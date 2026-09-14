@@ -1,0 +1,4 @@
+# Local demo diagnostic only; legacy server dependencies remain separate.
+# Verified on Windows x64, Python 3.14.2, MT5 terminal build 6182.
+MetaTrader5==5.0.6180
+numpy==2.5.3
