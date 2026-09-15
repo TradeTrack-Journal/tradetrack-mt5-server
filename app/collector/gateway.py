@@ -56,9 +56,11 @@ def collect(request, native=None, windows=None):
         raise CollectionError("INVALID_NATIVE_DATA")
     validate_data_path(executable, data_path)
     verified_build = None
+    trading_mode = None
+    consented = credentials.get("allowTradingPassword") is True
 
     def identity():
-        nonlocal verified_build
+        nonlocal verified_build, trading_mode
         if windows.process_identity(request["processId"], executable) != request["processIdentity"]:
             raise CollectionError("TERMINAL_CHANGED")
         account, terminal = native.account_info(), native.terminal_info()
@@ -67,11 +69,14 @@ def collect(request, native=None, windows=None):
             raise CollectionError("IDENTITY_DRIFT")
         if not terminal.connected:
             raise CollectionError("CONNECTION_FAILED")
-        if account.trade_allowed:
+        if account.trade_allowed and not consented:
             raise CollectionError("TRADING_ENABLED")
+        if trading_mode is not None and trading_mode != bool(account.trade_allowed):
+            raise CollectionError("IDENTITY_DRIFT")
+        trading_mode = bool(account.trade_allowed)
         if not terminal.tradeapi_disabled:
             raise CollectionError("PYTHON_TRADING_ENABLED")
-        if not windows.read_only_session(request["processId"], executable, request["processIdentity"], login, server, terminal.build):
+        if not trading_mode and not windows.read_only_session(request["processId"], executable, request["processIdentity"], login, server, terminal.build):
             raise CollectionError("INVESTOR_UNVERIFIED")
         if verified_build is not None and verified_build != terminal.build:
             raise CollectionError("IDENTITY_DRIFT")
@@ -153,8 +158,8 @@ def collect(request, native=None, windows=None):
         return {"schemaVersion": 1, "login": login, "serverName": server,
                 "observedAt": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
                 "timestampBasis": "broker_reported_unresolved", "historyCompletenessVerified": False,
-                "investorVerified": True, "pythonTradingDisabled": True,
-                "investorVerificationMethod": "terminal_title_read_only", "terminalBuild": verified_build,
+                "investorVerified": not trading_mode, "pythonTradingDisabled": True,
+                "investorVerificationMethod": "trading_password_consent" if trading_mode else "terminal_title_read_only", "terminalBuild": verified_build,
                 "account": asdict(account),
                 "windowStartMs": window.start_ms, "windowEndMs": window.end_ms,
                 **({"rangeCountVerified": True, "olderHistoryEmpty": older_empty} if count_verified else {}),

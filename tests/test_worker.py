@@ -84,6 +84,39 @@ class GatewayTests(unittest.TestCase):
             collect(self.request, self.native, self.windows)
         self.native.history_deals_get.assert_not_called()
 
+    def test_consented_trading_password_reads_without_trading(self):
+        self.native.account_info.return_value.trade_allowed = True
+        self.windows.read_only_session.return_value = False
+        self.request['credentials']['allowTradingPassword'] = True
+        result = collect(self.request, self.native, self.windows)
+        self.assertFalse(result['investorVerified'])
+        self.assertEqual(result['investorVerificationMethod'], 'trading_password_consent')
+        self.native.order_send.assert_not_called()
+        self.native.order_check.assert_not_called()
+
+    def test_consent_requires_boolean_true(self):
+        self.native.account_info.return_value.trade_allowed = True
+        self.request['credentials']['allowTradingPassword'] = 'true'
+        with self.assertRaisesRegex(CollectionError, 'TRADING_ENABLED'):
+            collect(self.request, self.native, self.windows)
+        self.native.history_deals_get.assert_not_called()
+
+    def test_consent_does_not_allow_python_trading(self):
+        self.native.account_info.return_value.trade_allowed = True
+        self.native.terminal_info.return_value.tradeapi_disabled = False
+        self.request['credentials']['allowTradingPassword'] = True
+        with self.assertRaisesRegex(CollectionError, 'PYTHON_TRADING_ENABLED'):
+            collect(self.request, self.native, self.windows)
+        self.native.history_deals_get.assert_not_called()
+
+    def test_consent_does_not_allow_server_mismatch(self):
+        self.native.account_info.return_value.trade_allowed = True
+        self.native.account_info.return_value.server = 'Wrong'
+        self.request['credentials']['allowTradingPassword'] = True
+        with self.assertRaisesRegex(CollectionError, 'IDENTITY_DRIFT'):
+            collect(self.request, self.native, self.windows)
+        self.native.history_deals_get.assert_not_called()
+
     def test_python_trading_must_be_disabled(self):
         self.native.terminal_info.return_value.tradeapi_disabled = False
         with self.assertRaisesRegex(CollectionError, 'PYTHON_TRADING_ENABLED'):
