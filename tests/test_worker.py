@@ -94,6 +94,14 @@ class GatewayTests(unittest.TestCase):
         self.native.order_send.assert_not_called()
         self.native.order_check.assert_not_called()
 
+    def test_consent_allows_unverified_caption_without_claiming_investor_mode(self):
+        self.windows.read_only_session.return_value = False
+        self.request['credentials']['allowTradingPassword'] = True
+        result = collect(self.request, self.native, self.windows)
+        self.assertFalse(result['investorVerified'])
+        self.assertEqual(result['investorVerificationMethod'], 'trading_password_consent')
+        self.assertTrue(result['pythonTradingDisabled'])
+
     def test_consent_requires_boolean_true(self):
         self.native.account_info.return_value.trade_allowed = True
         self.request['credentials']['allowTradingPassword'] = 'true'
