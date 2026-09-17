@@ -227,7 +227,7 @@ class WindowsTerminal:
             owner = self.u.GetWindow(owner, 4)
         return False
 
-    def defer_live_update(self, pid, executable, identity, main, dialog):
+    def defer_live_update(self, pid, executable, identity, main, dialog, managed_login=False):
         """Defer only the exact supported update prompt, under the slot mutex."""
         def text(handle):
             buffer = c.create_unicode_buffer(256)
@@ -251,10 +251,11 @@ class WindowsTerminal:
             label = self.u.GetDlgItem(dialog, 10405)
             # Managed terminals intentionally do not persist passwords. On
             # restart MT5 may show this blank prompt before native API login.
-            # Never dismiss a prompt containing a password typed by a person.
+            # Interactive tools preserve typed prompts. Dedicated worker slots may
+            # cancel stale Login dialogs between jobs; never submit their contents.
             supported = bool(password and server and label and self.class_name(password) == 'Edit'
                              and self.class_name(server) == 'ComboBox' and text(label) == 'Server:'
-                             and self.send(password, 0xE) == 0 and later and text(later) == 'Cancel')
+                             and (managed_login or self.send(password, 0xE) == 0) and later and text(later) == 'Cancel')
         if (not self.owned_by_main(pid, main, dialog) or not supported or not later or self.class_name(later) != 'Button'):
             raise InventoryError('TERMINAL_UI_BUSY')
         if self.process_identity(pid, executable) != identity:
@@ -266,14 +267,14 @@ class WindowsTerminal:
         if self.u.IsWindow(dialog) and self.u.IsWindowVisible(dialog):
             raise InventoryError('UI_CLEANUP_FAILED')
 
-    def visible_servers(self, pid, executable, identity):
+    def visible_servers(self, pid, executable, identity, managed_login=False):
         """Open only our own login dialog, read only its Server combo, cancel it."""
         with _inventory_ui_lock, self.inventory_lock(executable):
             before = [h for h in self.windows(pid) if self.class_name(h) != '#32770' or self.u.IsWindowVisible(h)]
             mains = [h for h in before if self.class_name(h) == "MetaQuotes::MetaTrader::5.00"]
             dialogs = [h for h in before if self.class_name(h) == '#32770']
             if len(mains) == 1 and len(dialogs) == 1:
-                self.defer_live_update(pid, executable, identity, mains[0], dialogs[0])
+                self.defer_live_update(pid, executable, identity, mains[0], dialogs[0], managed_login=managed_login)
                 before = [h for h in self.windows(pid) if self.class_name(h) != '#32770' or self.u.IsWindowVisible(h)]
             if len(mains) != 1 or any(self.class_name(h) == "#32770" for h in before):
                 raise InventoryError("TERMINAL_UI_BUSY")
@@ -353,7 +354,7 @@ def collect_inventory(executable, data_path, inspect_ui=False):
     if pid is None:
         return {"status": "OFFLINE", "processId": None, "processIdentity": None, "catalogHash": None, "serverNames": [], "verificationMethod": "none", "errorCode": None}
     fingerprint = catalogue_fingerprint(data_path)
-    names = windows.visible_servers(pid, executable, identity) if inspect_ui else []
+    names = windows.visible_servers(pid, executable, identity, managed_login=True) if inspect_ui else []
     if catalogue_fingerprint(data_path) != fingerprint or windows.process_identity(pid, executable) != identity:
         raise InventoryError("TERMINAL_CHANGED")
     return {"status": "STARTING", "processId": pid, "processIdentity": identity, "catalogHash": fingerprint, "serverNames": names, "verificationMethod": "login_dialog" if inspect_ui else "none", "errorCode": None}

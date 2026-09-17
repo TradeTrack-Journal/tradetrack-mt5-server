@@ -89,3 +89,12 @@ class LiveUpdateTests(unittest.TestCase):
             else:
                 native.defer_live_update(1, 'terminal64.exe', 'verified', 100, 200)
                 native.u.PostMessageW.assert_called_once_with(200, 0x111, 2, 12)
+
+    def test_managed_slot_cancels_stale_login_without_reading_password(self):
+        native = self.terminal(title='Login')
+        labels = {200:'Login', 12:'Cancel', 10415:'Server:'}
+        native.u.GetWindowTextW.side_effect = lambda handle, buffer, size: setattr(buffer, 'value', labels[handle])
+        native.class_name.side_effect = lambda handle: {10148:'Edit', 10149:'ComboBox'}.get(handle, 'Button')
+        native.send = MagicMock(side_effect=AssertionError('Password must not be read'))
+        native.defer_live_update(1, 'terminal64.exe', 'verified', 100, 200, managed_login=True)
+        native.u.PostMessageW.assert_called_once_with(200, 0x111, 2, 12)
