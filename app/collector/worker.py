@@ -87,6 +87,7 @@ class SlotWorker:
         self.catalog_hash = None
         self.windows = WindowsTerminal()
         self.restart_identity = None
+        self.offline_restart_after = 0
 
     def connect(self):
         self.inventory.connect()
@@ -110,6 +111,16 @@ class SlotWorker:
         # Maintenance between jobs only; no dialogs while a native child holds the slot.
         if time.monotonic() - self.inspected_at >= 90:
             report = self.inventory.report_slot(slot, inspect_ui=True)
+            if report["status"] == "OFFLINE" and time.monotonic() >= self.offline_restart_after:
+                # report_slot has fenced the absent process/session with the API.
+                # Only launch a missing configured terminal, never replace a live process.
+                from .server_preparation import start_terminal
+                with self.windows.inventory_lock(slot['executablePath']):
+                    if self.windows.find_process(slot['executablePath'])[0] is None:
+                        self.offline_restart_after = time.monotonic() + 60
+                        start_terminal(slot['executablePath'])
+                self.inspected_at = 0
+                return {'slotId': slot['id'], 'state': 'restarting', 'errorCode': None}
             if report["status"] != "STARTING":
                 return {"slotId": slot["id"], "state": "offline", "errorCode": report["errorCode"]}
             self.catalog_hash = self.inventory.last_snapshots[slot["id"]]["catalogHash"]

@@ -249,6 +249,7 @@ class WorkerTests(unittest.TestCase):
     def test_closed_terminal_is_reported_without_claim(self):
         worker = object.__new__(SlotWorker)
         worker.restart_identity = None
+        worker.offline_restart_after = time.monotonic() + 60
         worker.slot = {'id': 'closed'}
         worker.inventory = MagicMock()
         worker.inventory.report_slot.return_value = {'status': 'OFFLINE', 'errorCode': None}
