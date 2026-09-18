@@ -53,3 +53,9 @@ class RecoveryTests(TestCase):
         with patch('app.collector.server_preparation.start_terminal') as start:
             worker.prepare_inventory()
             start.assert_not_called()
+
+    def test_active_updater_prevents_another_terminal_launch(self):
+        from app.collector.server_preparation import start_terminal
+        with patch('app.collector.server_preparation.update_running', return_value=True), patch('app.collector.server_preparation.subprocess.Popen') as launch:
+            start_terminal('terminal.exe')
+            launch.assert_not_called()

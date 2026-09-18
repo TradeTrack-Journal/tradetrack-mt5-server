@@ -7,10 +7,33 @@ import subprocess
 import time
 
 from .server_builder import ServerBuilder, validate_builder
-from .windows_inventory import InventoryError, catalogue_fingerprint
+from .windows_inventory import WindowsTerminal, InventoryError, catalogue_fingerprint
+
+
+def update_running(executable):
+    root = Path(os.environ.get('APPDATA', '')) / 'MetaQuotes' / 'Terminal'
+    native = WindowsTerminal()
+    for origin in root.glob('*/origin.txt'):
+        try:
+            raw = origin.read_bytes()
+            text = raw.decode('utf-16') if raw.startswith((b'\xff\xfe', b'\xfe\xff')) else raw.decode('utf-8-sig')
+            if Path(text.strip()).resolve() != Path(executable).resolve().parent:
+                continue
+            updater = origin.parent / 'liveupdate' / 'terminal64.exe'
+            if native.find_process(str(updater))[0] is not None:
+                return True
+        except (OSError, UnicodeError):
+            continue
+        except InventoryError as error:
+            if str(error) == 'AMBIGUOUS_TERMINAL_PROCESS':
+                return True
+            raise
+    return False
 
 
 def start_terminal(executable):
+    if update_running(executable):
+        return
     startup = subprocess.STARTUPINFO()
     startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     startup.wShowWindow = 0
