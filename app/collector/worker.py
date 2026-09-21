@@ -91,6 +91,7 @@ class SlotWorker:
 
     def connect(self):
         self.inventory.connect()
+        self.restart_identity = self.inventory.remote_slots[self.slot['id']].get('quarantineIdentity')
 
     def prepare_inventory(self):
         slot = self.slot
@@ -104,7 +105,10 @@ class SlotWorker:
                     close_terminal(self.windows, slot['executablePath'])
                     pid = None
                 if not pid:
-                    start_terminal(slot['executablePath'])
+                    if start_terminal(slot['executablePath']) is False:
+                        # An updater can outlive MT5. Retain recovery intent until
+                        # launch succeeds; an absent quarantined session is rejected.
+                        return {'slotId': slot['id'], 'state': 'update_pending', 'errorCode': None}
                 self.restart_identity = None
                 self.inspected_at = 0
             return {'slotId': slot['id'], 'state': 'restarting', 'errorCode': None}

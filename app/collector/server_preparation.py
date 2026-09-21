@@ -20,7 +20,15 @@ def update_running(executable):
             if Path(text.strip()).resolve() != Path(executable).resolve().parent:
                 continue
             updater = origin.parent / 'liveupdate' / 'terminal64.exe'
-            if native.find_process(str(updater))[0] is not None:
+            pid, identity = native.find_process(str(updater))
+            if pid is not None:
+                from .update_recovery import recover_stalled_update
+                try:
+                    with native.inventory_lock(str(executable)):
+                        if recover_stalled_update(native, executable, updater, pid, identity):
+                            continue
+                except OSError:
+                    return True  # Unreadable/changing update files do not permit a second launch.
                 return True
         except (OSError, UnicodeError):
             continue
@@ -33,11 +41,12 @@ def update_running(executable):
 
 def start_terminal(executable):
     if update_running(executable):
-        return
+        return False
     startup = subprocess.STARTUPINFO()
     startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     startup.wShowWindow = 0
     subprocess.Popen([str(executable), '/portable'], cwd=str(Path(executable).parent), startupinfo=startup)
+    return True
 
 
 def close_terminal(native, executable):

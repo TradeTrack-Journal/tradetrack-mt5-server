@@ -30,6 +30,20 @@ class RecoveryTests(TestCase):
             close.assert_not_called()
             start.assert_not_called()
 
+    def test_updater_wait_preserves_quarantine_recovery_intent(self):
+        worker = self.worker(None)
+        worker.windows.find_process.return_value = (None, None)
+        with patch('app.collector.server_preparation.start_terminal', return_value=False):
+            self.assertEqual(worker.prepare_inventory()['state'], 'update_pending')
+        self.assertEqual(worker.restart_identity, 'old')
+
+    def test_quarantine_recovery_survives_worker_restart(self):
+        worker = self.worker(None)
+        worker.inventory = MagicMock()
+        worker.inventory.remote_slots = {'demo-02': {'quarantineIdentity': 'persisted'}}
+        worker.connect()
+        self.assertEqual(worker.restart_identity, 'persisted')
+
     def test_offline_terminal_restarts_once_and_backs_off(self):
         worker = self.worker(None)
         worker.restart_identity = None
