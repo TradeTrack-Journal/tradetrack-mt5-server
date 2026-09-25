@@ -90,6 +90,18 @@ class AgentTests(unittest.TestCase):
             client.call("/config")
         sleep.assert_not_called()
 
+    @patch("app.collector.node_agent.time.sleep")
+    def test_server_error_retry_preserves_completion_identity_and_is_bounded(self, sleep):
+        client = NodeClient("https://api.example", "node-1", "a" * 43)
+        client.opener.open = MagicMock(side_effect=lambda *a, **k: (_ for _ in ()).throw(HTTPError("https://api.example", 500, "sensitive", {}, None)))
+        with self.assertRaisesRegex(AgentError, '^API_HTTP_500$') as raised:
+            client.call('/slots/slot-1/jobs/job-1/complete', {'leaseToken': 'same', 'fence': '2'})
+        self.assertEqual(raised.exception.operation, 'complete')
+        requests = [call.args[0] for call in client.opener.open.call_args_list]
+        self.assertEqual(len(requests), 3)
+        self.assertEqual(len({request.data for request in requests}), 1)
+        self.assertEqual(sleep.call_count, 2)
+
     def test_local_config_rejects_shared_terminal(self):
         with tempfile.TemporaryDirectory() as path:
             root = Path(path)

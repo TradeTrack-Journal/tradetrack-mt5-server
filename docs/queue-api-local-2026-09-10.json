@@ -1,0 +1,18 @@
+{
+  "ok": true,
+  "fixture": "synthetic, isolated local PostgreSQL",
+  "checks": [
+    "concurrent_claims_distinct_jobs",
+    "lost_claim_ack_idempotent",
+    "credential_slot_and_fence_binding",
+    "atomic_result_and_duplicate_conflict",
+    "account_balance_equity_currency_persisted",
+    "rotation_revokes_old_lease_and_failure_ack",
+    "replacement_credentials_remain_queued",
+    "one_active_lease_per_account",
+    "raw_ticket_dedup_and_correction_preserve_precision",
+    "count_verified_backfill_cursor_and_completion",
+    "lease_expiry_and_quarantine_survive_agent_restart",
+    "canonical_journal_untouched"
+  ]
+}

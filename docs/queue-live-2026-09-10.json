@@ -1,0 +1,28 @@
+{
+  "jobStatus": "QUEUED",
+  "errorCode": null,
+  "canonicalTradeCount": 0,
+  "account": {
+    "equity": "100084.45",
+    "balance": "100084.45",
+    "currency": "USD"
+  },
+  "rawDealCount": 5,
+  "closingDealCount": 2,
+  "tradingProfit": "84.45",
+  "positionCount": 0,
+  "historyCompletenessVerified": false,
+  "slots": [
+    {
+      "slotId": "inventory-local-01",
+      "state": "offline",
+      "errorCode": null
+    },
+    {
+      "slotId": "inventory-local-02",
+      "state": "collected",
+      "dealCount": 5,
+      "positionCount": 0
+    }
+  ]
+}

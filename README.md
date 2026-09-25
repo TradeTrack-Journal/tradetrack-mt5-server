@@ -1,5 +1,56 @@
 # MT5 Backend (FastAPI)
 
+[Повний demo-збір та два каталоги серверів](docs/vps-demo-collection-and-servers.uk.md):
+explicit Python login і повторний raw-збір пройдено на двох demo; додано статуси
+готовності сервера. Автоматичний catalogue updater і login пропфірми ще не перевірені.
+
+[VPS demo build 6190](docs/vps-build-6190.uk.md): локально перевірено investor →
+master → investor і два окремі demo-слоти. English Demo/Hedge 6190 додано до gate;
+explicit Python login та наскрізний demo collector ще потребують перевірки.
+
+## Модернізація — локальний етап
+
+[Імпорт журналу та UI](docs/journal-ui.uk.md): реалізовано counted backfill,
+канонічний reducer, захищену форму інвесторського підключення та перевірений
+перехід зі старого EA. Увімкнення потребує підтвердженої політики broker time;
+production лишається вимкненим. Цей документ описує актуальний стан етапу.
+
+[План реалізації та критерії готовності](docs/python-server-plan.uk.md) описує
+новий Python collector, ізоляцію MT5, investor-only перевірку та інтеграцію з бекендом.
+Початок нового ядра — `app/collector/`: нормалізація всіх deals і positions,
+64-бітні IDs у JSON-рядках, UTC-вікна й явні помилки замість неповного успіху.
+Новий worker встановлює MT5-сесії через окремі дочірні процеси; старі API/RQ routes залишаються окремими.
+
+[Черга й worker — реалізований локальний shadow pilot](docs/queue-worker.uk.md):
+PostgreSQL jobs, lease/fencing, encrypted credentials, retries/quarantine та
+atomic raw storage через Nest. На реальному demo отримано 5 deals, 2 закриття,
+profit 84.45. Закритий термінал пропускається. Поточний investor gate підтримує
+лише перевірений English build 6182 / Demo Account; це ще не production rollout.
+
+[Результат першої живої перевірки](docs/live-probe-2026-09-10.uk.md):
+окрема дослідна `scripts/probe_mt5.py` підключила деморахунок через Python;
+холодний запуск і production guards ще потребують роботи. Інструкція проби,
+перевірені залежності та обмеження наведені у звіті.
+
+[Виправлення часової вибірки й запуск на вже відкритому MT5](docs/history-clock-and-attach-2026-09-10.uk.md):
+додано `--attach-pid`/`--data-path`; підтверджено дві закриті угоди деморахунку.
+Raw broker timestamps зберігаються без непідтвердженого перетворення в UTC.
+
+[Агент інвентаризації та протокол Nest](docs/node-agent.uk.md):
+перевірено два незалежні MT5, читання Server ComboBox і збереження звітів
+через захищені node routes. `scripts/report_mt5_inventory.py` не запускає
+термінали й не виконує login. Інвентаризація ще не є worker синхронізації.
+
+Перевірка ядра без MT5, Redis, мережі та паролів (лише стандартна бібліотека Python):
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+Нижче збережено опис **legacy-сервера**. Він містить відомі проблеми,
+зокрема неперевірений discovery та незахищені прямі маршрути; ці інструкції
+не є інструкцією розгортання модернізованої production-версії.
+
 Простий Python-сервер для підключення до MetaTrader 5 з VPS.
 
 ## Локальний запуск
@@ -104,4 +155,3 @@ python -m rq.cli worker --worker-class app.run_worker.WindowsSimpleWorker mt5_tr
 
 1. Зупинити: закрити вікна консолі з API та воркерами або виконати `taskkill /F /IM python.exe` (зупинить усі Python-процеси на машині).
 2. Запустити знову: спочатку API (`hypercorn app.main:app --bind 0.0.0.0:8000`), потім кожен воркер у своєму вікні (команди з розділу «Черга задач» вище).
-

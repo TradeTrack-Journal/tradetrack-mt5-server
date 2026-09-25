@@ -88,6 +88,7 @@ class SlotWorker:
         self.windows = WindowsTerminal()
         self.restart_identity = None
         self.offline_restart_after = 0
+        self.config_refreshed_at = 0
 
     def connect(self):
         self.inventory.connect()
@@ -95,8 +96,15 @@ class SlotWorker:
 
     def prepare_inventory(self):
         slot = self.slot
+        if not self.restart_identity and time.monotonic() - getattr(self, 'config_refreshed_at', 0) >= 60:
+            # A lease may expire AFTER connect() (e.g. a previous /complete got
+            # HTTP 500). Discover that durable fence instead of retrying reports
+            # forever with the quarantined process.
+            self.inventory.connect()
+            self.config_refreshed_at = time.monotonic()
+            self.restart_identity = self.inventory.remote_slots[slot['id']].get('quarantineIdentity')
         if self.restart_identity:
-            # Only set after the native child exited and /fail acknowledged its lease.
+            # Set after /fail acknowledged, or after the server fenced an expired lease.
             # Recovery runs on the UI thread and never stops other slots.
             from .server_preparation import close_terminal, start_terminal
             with self.windows.inventory_lock(slot['executablePath']):

@@ -252,6 +252,7 @@ class WorkerTests(unittest.TestCase):
         worker.offline_restart_after = time.monotonic() + 60
         worker.slot = {'id': 'closed'}
         worker.inventory = MagicMock()
+        worker.inventory.remote_slots = {'closed': {'quarantineIdentity': None}}
         worker.inventory.report_slot.return_value = {'status': 'OFFLINE', 'errorCode': None}
         worker.inspected_at = 0
         worker.client = MagicMock()

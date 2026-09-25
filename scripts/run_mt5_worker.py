@@ -6,13 +6,28 @@ import json
 import os
 import sys
 import time
+from datetime import datetime, timezone
+from pathlib import Path
+from threading import Lock
 
 from app.collector import telemetry
+
+_log_directory = None
+_log_lock = Lock()
 
 
 def emit(result):
     telemetry.report(result)
-    print(json.dumps(result), flush=True)
+    line = json.dumps(dict(result, at=datetime.now(timezone.utc).isoformat()))
+    if _log_directory is not None:
+        try:
+            with _log_lock:
+                path = _log_directory / ('worker-' + datetime.now(timezone.utc).strftime('%Y-%m-%d') + '.jsonl')
+                with path.open('a', encoding='utf-8') as stream:
+                    stream.write(line + '\n')
+        except OSError:
+            telemetry.report({'errorCode': 'WORKER_LOG_WRITE_FAILED'})
+    print(line, flush=True)
 
 
 def child():
@@ -33,6 +48,7 @@ def child():
 
 
 def main():
+    global _log_directory
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config")
     parser.add_argument("--once", action="store_true")
@@ -49,6 +65,7 @@ def main():
     if not args.config:
         parser.error("--config is required")
     config = load_config(args.config)
+    _log_directory = Path(args.config).resolve().parent
     token = os.environ.pop("MT5_AGENT_TOKEN", "")
 
     def consume(worker):
@@ -67,7 +84,7 @@ def main():
                 worker.inspected_at = 0
                 emit({"slotId": slot["id"], "state": "maintenance_required", "errorCode": str(exc)})
                 return True
-            emit({"slotId": slot["id"], "state": "stopped", "errorCode": str(exc)})
+            emit({"slotId": slot["id"], "state": "stopped", "errorCode": str(exc), "operation": getattr(exc, 'operation', None)})
             return False
         except Exception:
             emit({"slotId": slot["id"], "state": "stopped", "errorCode": "WORKER_FAILED"})

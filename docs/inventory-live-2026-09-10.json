@@ -1,0 +1,85 @@
+{
+  "verifiedAt": "2026-09-10T17:11:24.240921+00:00",
+  "localOnly": true,
+  "slots": [
+    {
+      "slotId": "inventory-local-01",
+      "status": "STARTING",
+      "visibleServerCount": 6,
+      "errorCode": null
+    },
+    {
+      "slotId": "inventory-local-02",
+      "status": "STARTING",
+      "visibleServerCount": 6,
+      "errorCode": null
+    }
+  ],
+  "inventory": {
+    "nodeId": "inventory-local-20260910",
+    "slots": [
+      {
+        "id": "inventory-local-01",
+        "status": "STARTING",
+        "lastHeartbeat": "2026-09-10T17:11:23.941Z",
+        "inventoryStale": false,
+        "observedServerNames": [
+          "FundedNext-Server",
+          "FundedNext-Server 2",
+          "FundedNext-Server 3",
+          "Headway-Demo",
+          "Headway-Real",
+          "MetaQuotes-Demo"
+        ],
+        "inventoryObservedAt": "2026-09-10T17:11:21.678Z",
+        "verificationMethod": "login_dialog",
+        "errorCode": null,
+        "serverStates": [
+          {
+            "serverId": "cmtvs59o00000jcw8jdhvuew6",
+            "observedAt": "2026-09-10T17:11:21.678Z",
+            "presence": "PRESENT"
+          }
+        ]
+      },
+      {
+        "id": "inventory-local-02",
+        "status": "STARTING",
+        "lastHeartbeat": "2026-09-10T17:11:21.504Z",
+        "inventoryStale": false,
+        "observedServerNames": [
+          "FundedNext-Server",
+          "FundedNext-Server 2",
+          "FundedNext-Server 3",
+          "Headway-Demo",
+          "Headway-Real",
+          "MetaQuotes-Demo"
+        ],
+        "inventoryObservedAt": "2026-09-10T17:11:21.508Z",
+        "verificationMethod": "login_dialog",
+        "errorCode": null,
+        "serverStates": [
+          {
+            "serverId": "cmtvs59o00000jcw8jdhvuew6",
+            "observedAt": "2026-09-10T17:11:21.508Z",
+            "presence": "PRESENT"
+          }
+        ]
+      }
+    ]
+  },
+  "checks": [
+    "wrong token rejected",
+    "cross-node slot rejected",
+    "invalid evidence rejected",
+    "same report idempotent",
+    "conflicting duplicate rejected",
+    "old sequence rejected",
+    "old generation rejected",
+    "session retry idempotent",
+    "expired report rejected",
+    "stale heartbeat becomes unknown",
+    "disabled node rejected"
+  ],
+  "terminalsLeftRunning": true
+}

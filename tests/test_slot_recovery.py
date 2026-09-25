@@ -51,6 +51,7 @@ class RecoveryTests(TestCase):
         worker.offline_restart_after = 0
         worker.windows.find_process.return_value = (None, None)
         worker.inventory = MagicMock()
+        worker.inventory.remote_slots = {'demo-02': {'quarantineIdentity': None}}
         worker.inventory.report_slot.return_value = {'status': 'OFFLINE', 'errorCode': None}
         with patch('app.collector.server_preparation.start_terminal') as start:
             self.assertEqual(worker.prepare_inventory()['state'], 'restarting')
@@ -63,6 +64,7 @@ class RecoveryTests(TestCase):
         worker.inspected_at = 0
         worker.offline_restart_after = 0
         worker.inventory = MagicMock()
+        worker.inventory.remote_slots = {'demo-02': {'quarantineIdentity': None}}
         worker.inventory.report_slot.return_value = {'status': 'OFFLINE', 'errorCode': None}
         with patch('app.collector.server_preparation.start_terminal') as start:
             worker.prepare_inventory()
@@ -73,3 +75,14 @@ class RecoveryTests(TestCase):
         with patch('app.collector.server_preparation.update_running', return_value=True), patch('app.collector.server_preparation.subprocess.Popen') as launch:
             start_terminal('terminal.exe')
             launch.assert_not_called()
+
+    def test_quarantine_arriving_after_connect_is_recovered(self):
+        worker = self.worker('old')
+        worker.restart_identity = None
+        worker.inspected_at = 0
+        worker.inventory = MagicMock()
+        worker.inventory.remote_slots = {'demo-02': {'quarantineIdentity': 'old'}}
+        with patch('app.collector.server_preparation.close_terminal') as close, patch('app.collector.server_preparation.start_terminal'):
+            self.assertEqual(worker.prepare_inventory()['state'], 'restarting')
+            close.assert_called_once()
+        worker.inventory.report_slot.assert_not_called()

@@ -13,7 +13,9 @@ from app.collector.windows_inventory import InventoryError, collect_inventory
 
 
 class AgentError(Exception):
-    pass
+    def __init__(self, code, operation=None):
+        super().__init__(code)
+        self.operation = operation
 
 
 class NoRedirect(request.HTTPRedirectHandler):
@@ -36,6 +38,9 @@ class NodeClient:
 
     def call(self, suffix, payload=None):
         data = None if payload is None else json.dumps(payload, separators=(",", ":")).encode()
+        operation = suffix.rsplit('/', 1)[-1]
+        if operation not in {'config', 'inventory', 'session', 'report', 'claim', 'credentials', 'heartbeat', 'complete', 'fail', 'prepare', 'preparation-missing'}:
+            operation = 'request'
         for attempt in range(3):
             req = request.Request(self.base + suffix, data=data, headers={"Authorization": "Bearer " + self.token, "Content-Type": "application/json"})
             retry_delay = min(2 ** attempt, 4)
@@ -52,8 +57,8 @@ class NodeClient:
                 status = exc.code
                 retry_after = exc.headers.get("Retry-After", "")
                 exc.close()
-                if status not in (429, 502, 503, 504) or attempt == 2:
-                    raise AgentError(f"API_HTTP_{status}") from None
+                if status not in (429, 500, 502, 503, 504) or attempt == 2:
+                    raise AgentError(f"API_HTTP_{status}", operation) from None
                 if retry_after.isdigit():
                     if int(retry_after) > 10:
                         raise AgentError("API_RETRY_LATER") from None
