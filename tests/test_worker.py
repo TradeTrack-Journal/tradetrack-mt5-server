@@ -160,7 +160,7 @@ class GatewayTests(unittest.TestCase):
 
     def test_unknown_investor_mode_fails_closed(self):
         self.windows.read_only_session.return_value = False
-        with patch('app.collector.gateway.time.monotonic', side_effect=[0, 3]):
+        with patch('app.collector.gateway.time.monotonic', side_effect=[0, 11]):
             with self.assertRaisesRegex(CollectionError, 'INVESTOR_UNVERIFIED'):
                 collect(self.request, self.native, self.windows)
         self.native.history_deals_get.assert_not_called()
@@ -175,6 +175,18 @@ class GatewayTests(unittest.TestCase):
             return True
         self.windows.read_only_session.side_effect = evidence
         self.assertTrue(collect(self.request, self.native, self.windows)['investorVerified'])
+
+    def test_slow_caption_keeps_history_gated_past_two_seconds(self):
+        attempts = []
+        def evidence(*args):
+            attempts.append(True)
+            if len(attempts) < 3:
+                self.native.history_deals_get.assert_not_called()
+                return False
+            return True
+        self.windows.read_only_session.side_effect = evidence
+        with patch('app.collector.gateway.time.monotonic', side_effect=[0, 3, 7]), patch('app.collector.gateway.time.sleep'):
+            self.assertTrue(collect(self.request, self.native, self.windows)['investorVerified'])
 
     def test_caption_wait_does_not_tolerate_trading_permission_change(self):
         self.windows.read_only_session.return_value = False

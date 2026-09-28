@@ -96,7 +96,9 @@ def collect(request, native=None, windows=None):
         # Native login can complete before the Windows caption is repainted.
         # Only the initial caption may settle; every retry rechecks account,
         # paths, process identity and both trading restrictions. Reads stay gated.
-        caption_deadline = time.monotonic() + 2
+        # Busy terminals can repaint later than the successful native login.
+        # Keep every identity/access check active and read no history while waiting.
+        caption_deadline = time.monotonic() + 10
         while True:
             try:
                 identity()
