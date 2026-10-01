@@ -1,0 +1,48 @@
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import Mock
+
+from app.collector.gateway import journal_baseline, login_failure
+
+
+class LoginFailureTests(unittest.TestCase):
+    def test_only_fresh_matching_transport_pair_is_retryable(self):
+        native = Mock(last_error=Mock(return_value=(-6, 'private native text')))
+        sync = "KD\t2\t14:46:34\tExample-Real\t'12345': error sending synchronization command\r\n"
+        common = "OQ\t2\t14:46:34\tNetwork\t'12345': authorization on Example-Real failed (Common error)\r\n"
+        with tempfile.TemporaryDirectory() as root:
+            folder = Path(root) / 'logs'; folder.mkdir()
+            path = folder / '20261001.log'
+            path.write_text(sync + common, encoding='utf-16')
+            baseline = journal_baseline(root)
+            classify = lambda login='12345', server='Example-Real': login_failure(native, root, baseline, login, server)
+            self.assertEqual(classify(), 'AUTH_FAILED')  # old evidence
+            with path.open('ab') as out:
+                out.write(common.encode('utf-16-le'))
+            self.assertEqual(classify(), 'AUTH_FAILED')  # incomplete pair
+            with path.open('ab') as out:
+                out.write(sync.encode('utf-16-le'))
+            self.assertEqual(classify(), 'NETWORK_UNAVAILABLE')
+            self.assertEqual(classify(login='99999'), 'AUTH_FAILED')
+            self.assertEqual(classify(server='Other'), 'AUTH_FAILED')
+            self.assertEqual(login_failure(native, root, None, '12345', 'Example-Real'), 'AUTH_FAILED')
+
+    def test_invalid_account_is_not_reclassified(self):
+        native = Mock(last_error=Mock(return_value=(-6, 'private native text')))
+        with tempfile.TemporaryDirectory() as root:
+            folder = Path(root) / 'logs'; folder.mkdir()
+            baseline = journal_baseline(root)
+            path = folder / '20261001.log'
+            path.write_text("KD\t2\ttime\tExample-Real\t'12345': error sending synchronization command\r\n"
+                            "OQ\t2\ttime\tNetwork\t'12345': authorization on Example-Real failed (Invalid account)\r\n", encoding='utf-16')
+            self.assertEqual(login_failure(native, root, baseline, '12345', 'Example-Real'), 'AUTH_FAILED')
+
+    def test_rotated_or_unreadable_evidence_keeps_auth_failure(self):
+        native = Mock(last_error=Mock(return_value=(-6, 'private native text')))
+        with tempfile.TemporaryDirectory() as root:
+            folder = Path(root) / 'logs'; folder.mkdir()
+            path = folder / '20261001.log'; path.write_text('old', encoding='utf-16')
+            baseline = journal_baseline(root)
+            path.write_bytes(b'')
+            self.assertEqual(login_failure(native, root, baseline, '12345', 'Example-Real'), 'AUTH_FAILED')

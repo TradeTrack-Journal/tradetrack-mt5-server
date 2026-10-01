@@ -39,8 +39,8 @@ def journal_baseline(data_path):
     return {p.name: (p.stat().st_ino, p.stat().st_size) for p in paths}
 
 
-def investor_evidence(data_path, baseline, login):
-    """Only fresh appended English journal messages; old/cached evidence is rejected."""
+def fresh_journal_lines(data_path, baseline):
+    """Bounded appended journal evidence; never returned across the native boundary."""
     for path in (Path(data_path) / "logs").glob("*.log"):
         stat = path.stat()
         inode, offset = baseline.get(path.name, (stat.st_ino, 0))
@@ -53,11 +53,34 @@ def investor_evidence(data_path, baseline, login):
             fresh = stream.read(1024 * 1024 + 1)
         if len(fresh) > 1024 * 1024 or len(fresh) % 2:
             raise CollectionError("JOURNAL_UNAVAILABLE")
-        lines = fresh.decode("utf-16-le").splitlines()
-        expected = f"'{login}': trading has been disabled - investor mode"
-        if any(line.split("\t")[-1].strip() == expected for line in lines):
-            return True
-    return False
+        yield from fresh.decode("utf-16-le").splitlines()
+
+
+def investor_evidence(data_path, baseline, login):
+    """Only fresh appended English journal messages; old/cached evidence is rejected."""
+    expected = f"'{login}': trading has been disabled - investor mode"
+    return any(line.split("\t")[-1].strip() == expected for line in fresh_journal_lines(data_path, baseline))
+
+
+def login_failure(native, data_path, baseline, login, server):
+    code = connection_error(native)
+    if code != 'AUTH_FAILED' or baseline is None:
+        return code
+    # MT5 also uses -6 during access-point/server switching. Only this exact,
+    # fresh pair proves a transport synchronization error, not bad credentials.
+    # This merely requests a later retry: identity and access gates stay intact.
+    sync_failed = common_error = False
+    try:
+        for line in fresh_journal_lines(data_path, baseline):
+            fields = line.split('\t')
+            if len(fields) < 5:
+                continue
+            source, message = fields[-2], fields[-1].strip()
+            sync_failed |= source == server and message == f"'{login}': error sending synchronization command"
+            common_error |= source == 'Network' and message == f"'{login}': authorization on {server} failed (Common error)"
+    except (OSError, UnicodeError, CollectionError):
+        return code
+    return 'NETWORK_UNAVAILABLE' if sync_failed and common_error else code
 
 
 def collect(request, native=None, windows=None):
@@ -102,11 +125,15 @@ def collect(request, native=None, windows=None):
         if windows.process_identity(request["processId"], executable) != request["processIdentity"]:
             raise CollectionError("TERMINAL_CHANGED")
         # Native API has no attach-only switch. Identity before/after fences its launch race.
+        try:
+            baseline = journal_baseline(data_path)
+        except (OSError, CollectionError):
+            baseline = None
         if not native.initialize(executable, login=int(login), password=credentials["investorPassword"], server=server,
                                  portable=Path(data_path).resolve() == Path(executable).parent.resolve(), timeout=20000):
-            raise CollectionError(connection_error(native))
+            raise CollectionError(login_failure(native, data_path, baseline, login, server))
         if not native.login(int(login), password=credentials["investorPassword"], server=server, timeout=20000):
-            raise CollectionError(connection_error(native))
+            raise CollectionError(login_failure(native, data_path, baseline, login, server))
         credentials.pop("investorPassword", None)
         # Native login can complete before the Windows caption is repainted.
         # Only the initial caption may settle; every retry rechecks account,
