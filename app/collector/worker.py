@@ -171,7 +171,7 @@ class SlotWorker:
             result = run_child(payload, lambda: self.client.call(path + "/heartbeat", lease), timeout=min(125, remaining - 35))
             if "errorCode" in result:
                 self.client.call(path + "/fail", dict(lease, errorCode=result["errorCode"]))
-                if result["errorCode"] in ("CHILD_TIMEOUT", "CHILD_FAILED", "IDENTITY_DRIFT", "TERMINAL_CHANGED"):
+                if result["errorCode"] in ("CHILD_TIMEOUT", "CHILD_FAILED", "IDENTITY_DRIFT", "TERMINAL_CHANGED", "TERMINAL_IPC_UNAVAILABLE"):
                     self.restart_identity = identity
                     raise AgentError("TERMINAL_QUARANTINED")
                 return {"slotId": slot["id"], "state": "failed", "errorCode": result["errorCode"]}

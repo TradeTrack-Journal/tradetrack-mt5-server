@@ -1,11 +1,9 @@
 """Run the shadow collector against configured, already running Windows terminals."""
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
@@ -52,6 +50,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config")
     parser.add_argument("--once", action="store_true")
+    parser.add_argument("--drain-file", help="Stop claiming and exit after in-flight jobs finish when this file exists")
     parser.add_argument("--builder", help="Dedicated credential-free server-builder terminal")
     parser.add_argument("--child", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -59,82 +58,21 @@ def main():
         child()
         return
     telemetry.initialize()
-    from app.collector.node_agent import load_config, AgentError
+    from app.collector.node_agent import load_config
     from app.collector.worker import SlotWorker
-    from app.collector.windows_inventory import InventoryError
     if not args.config:
         parser.error("--config is required")
     config = load_config(args.config)
     _log_directory = Path(args.config).resolve().parent
     token = os.environ.pop("MT5_AGENT_TOKEN", "")
 
-    def consume(worker):
-        slot = worker.slot
-        try:
-            emit(worker.once(allow_ui=False))
-            return True
-        except (AgentError, InventoryError) as exc:
-            if str(exc) == 'TERMINAL_QUARANTINED':
-                emit({"slotId": slot["id"], "state": "recovery_pending", "errorCode": str(exc)})
-                return True
-            if str(exc) in {'API_UNAVAILABLE', 'API_RETRY_LATER'}:
-                emit({"slotId": slot["id"], "state": "retrying", "errorCode": str(exc)})
-                return True
-            if str(exc) == 'TERMINAL_CHANGED':
-                worker.inspected_at = 0
-                emit({"slotId": slot["id"], "state": "maintenance_required", "errorCode": str(exc)})
-                return True
-            emit({"slotId": slot["id"], "state": "stopped", "errorCode": str(exc), "operation": getattr(exc, 'operation', None)})
-            return False
-        except Exception:
-            emit({"slotId": slot["id"], "state": "stopped", "errorCode": "WORKER_FAILED"})
-            return False
-
-    workers = [SlotWorker(config, token, slot) for slot in config['slots']]
-    for worker in workers:
-        worker.connect()
-    failed = False
+    from app.collector.scheduler import run_slots
     from app.collector.server_preparation import ServerPreparation
+    workers = [SlotWorker(config, token, slot) for slot in config['slots']]
     preparation = ServerPreparation(args.builder) if args.builder else None
-    with ThreadPoolExecutor(max_workers=len(workers)) as pool:
-        while workers:
-            inspected = [worker for worker in workers if worker.inspected_at]
-            if preparation and inspected:
-                try:
-                    result = preparation.once(inspected)
-                    if result:
-                        emit(result)
-                except (AgentError, InventoryError, OSError) as exc:
-                    code = str(exc) if isinstance(exc, (AgentError, InventoryError)) else 'PREPARATION_IO_FAILED'
-                    if not code or len(code) > 64 or not all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_' for c in code):
-                        code = 'PREPARATION_FAILED'
-                    emit({'state': 'SERVER_PREPARATION_RETRY', 'errorCode': code})
-            ready = []
-            # Win32 dialog inspection is reliable on the main thread. Complete
-            # this phase before starting native collection in parallel slots.
-            for worker in workers:
-                try:
-                    failure = worker.prepare_inventory()
-                    if failure:
-                        emit(failure)
-                        continue
-                    ready.append(worker)
-                except (AgentError, InventoryError) as exc:
-                    emit({'slotId': worker.slot['id'], 'state': 'offline', 'errorCode': str(exc)})
-            results = list(pool.map(consume, ready))
-            stopped = [worker for worker, ok in zip(ready, results) if not ok]
-            failed = failed or bool(stopped)
-            workers = [worker for worker in workers if worker not in stopped]
-            if args.once:
-                failed = failed or len(ready) != len(workers)
-                break
-            if stopped:
-                # Every native collection in this batch has finished. Let the
-                # supervisor recreate the full pool instead of silently losing
-                # one slot forever. Server-side leases/quarantine remain intact.
-                break
-            time.sleep(10)
-    if failed:
+    drained = lambda: bool(args.drain_file and Path(args.drain_file).exists())
+    ok = run_slots(workers, emit, preparation, once=args.once, stop=drained)
+    if args.once and not ok:
         raise SystemExit(1)
 
 

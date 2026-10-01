@@ -137,6 +137,28 @@ class GatewayTests(unittest.TestCase):
             collect(self.request, self.native, self.windows)
         self.native.history_deals_get.assert_not_called()
 
+    def test_explicit_auth_failure_is_not_treated_as_network(self):
+        self.native.login.return_value = False
+        self.native.last_error.return_value = (-6, 'synthetic secret broker text')
+        with self.assertRaisesRegex(CollectionError, '^AUTH_FAILED$'):
+            collect(self.request, self.native, self.windows)
+        self.native.history_deals_get.assert_not_called()
+        self.assertNotIn('investorPassword', self.request['credentials'])
+
+    def test_ipc_timeout_requires_terminal_recovery(self):
+        self.native.initialize.return_value = False
+        self.native.last_error.return_value = (-10005, 'synthetic secret broker text')
+        with self.assertRaisesRegex(CollectionError, '^TERMINAL_IPC_UNAVAILABLE$'):
+            collect(self.request, self.native, self.windows)
+        self.native.login.assert_not_called()
+        self.native.history_deals_get.assert_not_called()
+
+    def test_disconnected_verified_identity_is_network_failure(self):
+        self.native.terminal_info.return_value.connected = False
+        with self.assertRaisesRegex(CollectionError, '^NETWORK_UNAVAILABLE$'):
+            collect(self.request, self.native, self.windows)
+        self.native.history_deals_get.assert_not_called()
+
     def test_pid_reuse_prevents_initialize(self):
         self.windows.process_identity.return_value = '12:99'
         with self.assertRaisesRegex(CollectionError, 'TERMINAL_CHANGED'):

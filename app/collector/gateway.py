@@ -17,6 +17,21 @@ class CollectionError(Exception):
     pass
 
 
+def connection_error(native):
+    """Only numeric documented codes leave the native boundary; never error text."""
+    try:
+        error = native.last_error()
+        code = error[0] if isinstance(error, tuple) and error and type(error[0]) is int else None
+    except Exception:
+        code = None
+    if code == -6:
+        return 'AUTH_FAILED'
+    if code in (-10000, -10001, -10002, -10003, -10005):
+        return 'TERMINAL_IPC_UNAVAILABLE'
+    # Unknown login failures may be credentials/broker restrictions. Retry only boundedly.
+    return 'CONNECTION_FAILED'
+
+
 def journal_baseline(data_path):
     paths = list((Path(data_path) / "logs").glob("*.log"))
     if len(paths) > 512:
@@ -68,7 +83,7 @@ def collect(request, native=None, windows=None):
                 Path(terminal.path).resolve() != Path(executable).parent.resolve() or Path(terminal.data_path).resolve() != Path(data_path).resolve()):
             raise CollectionError("IDENTITY_DRIFT")
         if not terminal.connected:
-            raise CollectionError("CONNECTION_FAILED")
+            raise CollectionError("NETWORK_UNAVAILABLE")
         if account.trade_allowed and not consented:
             raise CollectionError("TRADING_ENABLED")
         if trading_mode is not None and trading_mode != bool(account.trade_allowed):
@@ -89,9 +104,9 @@ def collect(request, native=None, windows=None):
         # Native API has no attach-only switch. Identity before/after fences its launch race.
         if not native.initialize(executable, login=int(login), password=credentials["investorPassword"], server=server,
                                  portable=Path(data_path).resolve() == Path(executable).parent.resolve(), timeout=20000):
-            raise CollectionError("CONNECTION_FAILED")
+            raise CollectionError(connection_error(native))
         if not native.login(int(login), password=credentials["investorPassword"], server=server, timeout=20000):
-            raise CollectionError("CONNECTION_FAILED")
+            raise CollectionError(connection_error(native))
         credentials.pop("investorPassword", None)
         # Native login can complete before the Windows caption is repainted.
         # Only the initial caption may settle; every retry rechecks account,
