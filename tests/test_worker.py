@@ -78,6 +78,32 @@ class GatewayTests(unittest.TestCase):
             collect(self.request, self.native, self.windows)
         self.native.history_deals_get.assert_not_called()
 
+    def test_dense_recent_window_preserves_floor_for_durable_paging(self):
+        self.request['credentials']['adaptiveRecentHistory'] = True
+        self.native.history_deals_total.side_effect = lambda start, end: (
+            5001 if start.year > 1970 and (end - start).total_seconds() > 10 * 86400 else 0
+        )
+        result = collect(self.request, self.native, self.windows)
+        self.assertLess(result['recentWindowFloorMs'], result['windowStartMs'])
+        self.assertEqual(result['windowEndMs'] - result['recentWindowFloorMs'], 31 * 86400000)
+        self.assertLessEqual(result['windowEndMs'] - result['windowStartMs'], 10 * 86400000)
+        self.assertNotIn('backfillBeforeMs', result)
+
+    def test_recent_page_resumes_exact_upper_boundary(self):
+        self.request['credentials'].update(adaptiveRecentHistory=True,
+            recentBeforeMs=1700000000000, recentWindowFloorMs=1699990000000)
+        result = collect(self.request, self.native, self.windows)
+        self.assertEqual(result['recentBeforeMs'], result['windowEndMs'])
+        self.assertEqual(result['windowEndMs'], 1700000000000)
+        self.assertEqual(result['windowStartMs'], result['recentWindowFloorMs'])
+
+    def test_recent_pagination_requires_negotiated_capability(self):
+        self.request['credentials'].update(recentBeforeMs=1700000000000,
+            recentWindowFloorMs=1699990000000)
+        with self.assertRaisesRegex(CollectionError, 'INVALID_NATIVE_DATA'):
+            collect(self.request, self.native, self.windows)
+        self.native.history_deals_get.assert_not_called()
+
     def test_read_permission_is_required_even_with_investor_journal(self):
         self.native.account_info.return_value.trade_allowed = True
         with self.assertRaisesRegex(CollectionError, 'TRADING_ENABLED'):

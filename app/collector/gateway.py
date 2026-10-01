@@ -126,6 +126,15 @@ def collect(request, native=None, windows=None):
         before_ms = credentials.get("historyBeforeMs")
         window = plan_history_before(before_ms) if before_ms is not None else plan.native_window
         count_verified = callable(getattr(native, "history_deals_total", None))
+        adaptive_recent = credentials.get("adaptiveRecentHistory") is True and count_verified and before_ms is None
+        recent_before = credentials.get("recentBeforeMs")
+        if recent_before is not None:
+            floor = credentials.get("recentWindowFloorMs")
+            if not adaptive_recent or type(floor) is not int or type(recent_before) is not int:
+                raise CollectionError("INVALID_NATIVE_DATA")
+            window = HistoryWindow(datetime.fromtimestamp(floor / 1000, timezone.utc),
+                                   datetime.fromtimestamp(recent_before / 1000, timezone.utc))
+        recent_floor = window.start_ms
 
         def count(bounds):
             value = native.history_deals_total(*bounds)
@@ -133,7 +142,7 @@ def collect(request, native=None, windows=None):
                 raise CollectionError("HISTORY_UNAVAILABLE")
             return value
 
-        if count_verified and before_ms is not None:
+        if count_verified and (before_ms is not None or adaptive_recent):
             # Shrink dense historical windows; retain the fixed upper cursor so nothing is skipped.
             for _ in range(32):
                 if count(window.mt5_bounds()) <= 4000:
@@ -181,6 +190,8 @@ def collect(request, native=None, windows=None):
                 "windowStartMs": window.start_ms, "windowEndMs": window.end_ms,
                 **({"rangeCountVerified": True, "olderHistoryEmpty": older_empty} if count_verified else {}),
                 **({"backfillBeforeMs": before_ms} if before_ms is not None else {}),
+                **({"recentWindowFloorMs": recent_floor} if adaptive_recent else {}),
+                **({"recentBeforeMs": recent_before} if recent_before is not None else {}),
                 "deals": [asdict(item) for item in deals], "positions": [asdict(item) for item in positions]}
     except DataError as exc:
         code = exc.code if exc.code in ("HISTORY_UNAVAILABLE", "POSITIONS_UNAVAILABLE", "BATCH_TOO_LARGE") else "INVALID_NATIVE_DATA"
