@@ -247,6 +247,38 @@ class GatewayTests(unittest.TestCase):
 
 
 class WorkerTests(unittest.TestCase):
+    def test_catalog_rewrite_requires_inventory_before_any_claim(self):
+        worker = object.__new__(SlotWorker)
+        worker.slot = {'id': 'catalog-test', 'executablePath': 'terminal64.exe', 'dataPath': '.'}
+        worker.inspected_at = time.monotonic()
+        worker.catalog_hash = 'old-catalog'
+        worker.inventory = MagicMock()
+        worker.inventory.sessions = {'catalog-test': {'processIdentity': '12:34'}}
+        worker.windows = MagicMock()
+        worker.windows.inventory_lock.return_value = nullcontext()
+        worker.windows.find_process.return_value = (12, '12:34')
+        worker.client = MagicMock()
+        with patch('app.collector.worker.catalogue_fingerprint', return_value='new-catalog'):
+            result = worker.once(allow_ui=False)
+        self.assertEqual(result['state'], 'maintenance_required')
+        self.assertEqual(result['reason'], 'CATALOGUE_CHANGED')
+        self.assertEqual(worker.inspected_at, 0)
+        worker.client.call.assert_not_called()
+
+    def test_process_change_still_blocks_claim_as_failure(self):
+        worker = object.__new__(SlotWorker)
+        worker.slot = {'id': 'process-test', 'executablePath': 'terminal64.exe', 'dataPath': '.'}
+        worker.inspected_at = time.monotonic()
+        worker.inventory = MagicMock()
+        worker.inventory.sessions = {'process-test': {'processIdentity': '12:34'}}
+        worker.windows = MagicMock()
+        worker.windows.inventory_lock.return_value = nullcontext()
+        worker.windows.find_process.return_value = (13, '13:56')
+        worker.client = MagicMock()
+        with self.assertRaisesRegex(Exception, 'TERMINAL_CHANGED'):
+            worker.once(allow_ui=False)
+        worker.client.call.assert_not_called()
+
     def test_collection_thread_requests_main_thread_maintenance_without_ui(self):
         worker = object.__new__(SlotWorker)
         worker.restart_identity = None

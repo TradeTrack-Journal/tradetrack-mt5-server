@@ -35,6 +35,23 @@ class Worker:
 
 
 class SchedulerTests(unittest.TestCase):
+    def test_catalog_refresh_does_not_wait_for_failure_backoff_or_reconnect(self):
+        output, called_at = [], []
+        now = [0.0]
+        worker = Worker('catalog', lambda: None)
+        def once(allow_ui):
+            called_at.append(now[0])
+            return {'slotId': 'catalog', 'state': 'maintenance_required' if len(called_at) == 1 else 'collected'}
+        worker.once = once
+        def tick(seconds):
+            import time
+            now[0] += .1
+            time.sleep(.001)
+        run_slots([worker], output.append, stop=lambda: any(r['state'] == 'collected' for r in output),
+                  clock=lambda: now[0], sleep=tick)
+        self.assertLess(called_at[1] - called_at[0], 3)
+        self.assertEqual(worker.connects, 1)
+
     def test_fast_slot_collects_twice_while_other_child_is_blocked(self):
         blocked = Event()
         released = Event()

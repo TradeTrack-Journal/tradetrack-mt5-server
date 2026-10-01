@@ -56,7 +56,7 @@ def run_slots(workers, emit, preparation=None, once=False, stop=lambda: False,
                     result = state.future.result()
                     emit(dict(result, durationMs=round((clock() - state.started) * 1000)))
                     state.failures = 0
-                    state.due = clock() + interval
+                    state.due = clock() + (min(1, interval) if result.get('state') == 'maintenance_required' else interval)
                     state.finished = once
                 except Exception as error:
                     defer(state, error)

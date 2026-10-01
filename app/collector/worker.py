@@ -151,9 +151,14 @@ class SlotWorker:
         base = f"/slots/{quote(slot['id'], safe='')}/jobs"
         with self.windows.inventory_lock(slot["executablePath"]):
             pid, identity = self.windows.find_process(slot["executablePath"])
-            if not identity or identity != session["processIdentity"] or catalogue_fingerprint(slot["dataPath"]) != self.catalog_hash:
+            if not identity or identity != session["processIdentity"]:
                 self.inspected_at = 0
                 raise AgentError("TERMINAL_CHANGED")
+            if catalogue_fingerprint(slot["dataPath"]) != self.catalog_hash:
+                # MT5 rewrites servers.dat during normal broker use. Keep claims gated
+                # until fresh UI evidence, without treating a stable process as failed.
+                self.inspected_at = 0
+                return {"slotId": slot["id"], "state": "maintenance_required", "reason": "CATALOGUE_CHANGED"}
             response = self.client.call(base + "/claim", {"generation": session["generation"], "claimId": str(uuid4()), "requestedAt": utc_now()})
             job = response.get("job")
             if job is None:
