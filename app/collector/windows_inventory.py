@@ -31,7 +31,8 @@ def read_only_caption_matches(caption, login, server, build):
     This is an explicit terminal UI signal, not a cryptographic password attestation.
     """
     # Builds 6204/6230 verified on Headway/Exness/FundingPips, 2026-09-27.
-    if type(build) is not int or build not in (6182, 6190, 6193, 6204, 6230):
+    # Build 6231 verified on BrightFunded/MetaQuotes/Exness, 2026-10-01.
+    if type(build) is not int or build not in (6182, 6190, 6193, 6204, 6230, 6231):
         return False
     prefix = f"{login} - {server}: "
     mode = r"(Hedge|Netting)" if build == 6182 else "Hedge"

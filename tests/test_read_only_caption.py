@@ -3,6 +3,18 @@ from app.collector.windows_inventory import read_only_caption_matches
 
 
 class ReadOnlyCaptionTests(unittest.TestCase):
+    def test_observed_6231_broker_and_demo_captions(self):
+        for login, server, suffix in (
+            ('314797943', 'BrightFunded-Server', 'Read Only - Hedge - BrightFunded Ltd.'),
+            ('112447298', 'MetaQuotes-Demo', 'Demo Account - Read Only - Hedge - MetaQuotes Ltd.'),
+            ('81749697', 'Exness-MT5Trial10', 'Demo Account - Read Only - Hedge - Exness Technologies Ltd'),
+        ):
+            title = f'{login} - {server}: {suffix}'
+            self.assertTrue(read_only_caption_matches(title, login, server, 6231))
+            self.assertFalse(read_only_caption_matches(title.replace('Read Only - ', ''), login, server, 6231))
+            self.assertFalse(read_only_caption_matches(title, '999', server, 6231))
+            self.assertFalse(read_only_caption_matches(title, login, server, 6232))
+
     def test_observed_headway_6204_caption(self):
         title = '16933402 - Headway-Real: Read Only - Hedge - Jarocel (Pty) Ltd'
         self.assertTrue(read_only_caption_matches(title, '16933402', 'Headway-Real', 6204))
