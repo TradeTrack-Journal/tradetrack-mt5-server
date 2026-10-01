@@ -5,6 +5,37 @@ from app.collector.windows_inventory import WindowsTerminal, InventoryError
 
 
 class LiveUpdateTests(unittest.TestCase):
+    def test_managed_startup_siblings_are_validated_one_at_a_time(self):
+        native = self.terminal()
+        dialogs = [200, 300, 400]
+        native.windows = lambda pid: [100] + dialogs
+        native.class_name = lambda handle: 'MetaQuotes::MetaTrader::5.00' if handle == 100 else '#32770'
+        native.u.IsWindowVisible.return_value = True
+        native.defer_live_update = MagicMock(side_effect=lambda pid, exe, identity, main, dialog, **kwargs: dialogs.remove(dialog))
+        before, main = native.prepare_login_window(1, 'terminal64.exe', 'verified', managed_login=True)
+        self.assertEqual((before, main), ([100], 100))
+        self.assertEqual(native.defer_live_update.call_count, 3)
+
+    def test_interactive_multi_dialog_state_is_not_dismissed(self):
+        native = self.terminal()
+        native.windows = lambda pid: [100, 200, 300]
+        native.class_name = lambda handle: 'MetaQuotes::MetaTrader::5.00' if handle == 100 else '#32770'
+        native.u.IsWindowVisible.return_value = True
+        native.defer_live_update = MagicMock()
+        with self.assertRaisesRegex(InventoryError, 'TERMINAL_UI_BUSY'):
+            native.prepare_login_window(1, 'terminal64.exe', 'verified')
+        native.defer_live_update.assert_not_called()
+
+    def test_continuously_reappearing_dialogs_are_bounded(self):
+        native = self.terminal()
+        native.windows = lambda pid: [100, 200]
+        native.class_name = lambda handle: 'MetaQuotes::MetaTrader::5.00' if handle == 100 else '#32770'
+        native.u.IsWindowVisible.return_value = True
+        native.defer_live_update = MagicMock()
+        with self.assertRaisesRegex(InventoryError, 'TERMINAL_UI_BUSY'):
+            native.prepare_login_window(1, 'terminal64.exe', 'verified', managed_login=True)
+        self.assertEqual(native.defer_live_update.call_count, 3)
+
     def terminal(self, title='Welcome to LiveUpdate', identity='verified'):
         native = WindowsTerminal.__new__(WindowsTerminal)
         native.u = MagicMock()

@@ -1,4 +1,4 @@
-param([string]$ConfigDirectory = 'C:\TradeTrack\worker\production')
+param([string]$ConfigDirectory = 'C:\TradeTrack\worker\production', [string]$PythonPath = '')
 $ErrorActionPreference = 'Stop'
 $watchLock = [Threading.Mutex]::new($false, 'Local\TradeTrackHealthWatchdog')
 if (-not $watchLock.WaitOne(0)) { exit 0 }
@@ -8,9 +8,10 @@ try {
     try { $env:MT5_AGENT_TOKEN = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($tokenPtr) }
     finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($tokenPtr); $secureToken.Dispose() }
     $repo = Split-Path -Parent $PSScriptRoot
+    if (-not $PythonPath) { $PythonPath = Join-Path $repo '.venv\Scripts\python.exe' }
     Push-Location $repo
     try {
-        & (Join-Path $repo '.venv\Scripts\python.exe') -m scripts.watch_mt5_health --config (Join-Path $ConfigDirectory 'agent.json') --log (Join-Path $ConfigDirectory 'health-watchdog.jsonl')
+        & $PythonPath -m scripts.watch_mt5_health --config (Join-Path $ConfigDirectory 'agent.json') --log (Join-Path $ConfigDirectory 'health-watchdog.jsonl')
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     } finally { Pop-Location }
 } finally {

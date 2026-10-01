@@ -273,18 +273,30 @@ class WindowsTerminal:
         if self.u.IsWindow(dialog) and self.u.IsWindowVisible(dialog):
             raise InventoryError('UI_CLEANUP_FAILED')
 
-    def visible_servers(self, pid, executable, identity, managed_login=False):
-        """Open only our own login dialog, read only its Server combo, cancel it."""
-        with _inventory_ui_lock, self.inventory_lock(executable):
+    def prepare_login_window(self, pid, executable, identity, managed_login=False):
+        # Fresh/restarted managed terminals can show Update, Open Account and
+        # Login together. Each cancellation still requires exact controls,
+        # ownership and process identity; never dismiss an unknown dialog.
+        for attempt in range(4):
             before = [h for h in self.windows(pid) if self.class_name(h) != '#32770' or self.u.IsWindowVisible(h)]
             mains = [h for h in before if self.class_name(h) == "MetaQuotes::MetaTrader::5.00"]
             dialogs = [h for h in before if self.class_name(h) == '#32770']
-            if len(mains) == 1 and len(dialogs) == 1:
-                self.defer_live_update(pid, executable, identity, mains[0], dialogs[0], managed_login=managed_login)
-                before = [h for h in self.windows(pid) if self.class_name(h) != '#32770' or self.u.IsWindowVisible(h)]
-            if len(mains) != 1 or any(self.class_name(h) == "#32770" for h in before):
+            if len(mains) != 1:
                 raise InventoryError("TERMINAL_UI_BUSY")
-            main = mains[0]
+            if not dialogs:
+                return before, mains[0]
+            if attempt == 3 or (len(dialogs) > 1 and not managed_login):
+                raise InventoryError("TERMINAL_UI_BUSY")
+            leaves = [h for h in dialogs if not any(self.u.GetWindow(other, 4) == h for other in dialogs)]
+            if not leaves:
+                raise InventoryError("TERMINAL_UI_BUSY")
+            self.defer_live_update(pid, executable, identity, mains[0], leaves[0], managed_login=managed_login)
+        raise InventoryError("TERMINAL_UI_BUSY")
+
+    def visible_servers(self, pid, executable, identity, managed_login=False):
+        """Open only our own login dialog, read only its Server combo, cancel it."""
+        with _inventory_ui_lock, self.inventory_lock(executable):
+            before, main = self.prepare_login_window(pid, executable, identity, managed_login)
             if not self.u.IsWindowEnabled(main) or self.process_identity(pid, executable) != identity:
                 raise InventoryError("TERMINAL_UI_BUSY")
             commands = self.login_command(self.u.GetMenu(main))

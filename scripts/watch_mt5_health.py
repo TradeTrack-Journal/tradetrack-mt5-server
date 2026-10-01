@@ -32,6 +32,9 @@ def main():
 
     while True:
         try:
+            # A pool expansion must not leave the watchdog comparing against
+            # its old slot list forever. Validate the complete file on each pass.
+            config = load_config(args.config)
             agent = InventoryAgent(config, token)
             agent.connect()
             inventory = agent.client.call('/inventory')
