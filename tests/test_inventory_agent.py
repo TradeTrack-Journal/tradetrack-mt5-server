@@ -44,6 +44,7 @@ class InventoryTests(unittest.TestCase):
     @patch("app.collector.windows_inventory.catalogue_fingerprint", return_value="a" * 64)
     def test_hash_alone_does_not_prove_presence(self, _, windows, __):
         windows.return_value.find_process.return_value = (12, "12:34")
+        windows.return_value.terminal_build.return_value = 6231
         windows.return_value.process_identity.return_value = "12:34"
         result = collect_inventory("terminal64.exe", ".")
         self.assertEqual(result["verificationMethod"], "none")
@@ -55,9 +56,25 @@ class InventoryTests(unittest.TestCase):
     @patch("app.collector.windows_inventory.catalogue_fingerprint", side_effect=["a" * 64, "b" * 64])
     def test_changed_catalogue_discards_ui_evidence(self, _, windows, __):
         windows.return_value.find_process.return_value = (12, "12:34")
+        windows.return_value.terminal_build.return_value = 6231
         windows.return_value.visible_servers.return_value = ["Example-Demo"]
         with self.assertRaisesRegex(InventoryError, "TERMINAL_CHANGED"):
             collect_inventory("terminal64.exe", ".", inspect_ui=True)
+
+    @patch("app.collector.windows_inventory.validate_data_path")
+    @patch("app.collector.windows_inventory.WindowsTerminal")
+    @patch("app.collector.windows_inventory.catalogue_fingerprint")
+    def test_unknown_build_blocks_slot_without_reading_catalogue(self, fingerprint, windows, _):
+        windows.return_value.find_process.return_value = (12, "12:34")
+        windows.return_value.process_identity.return_value = "12:34"
+        for build, code in ((6232, 'TERMINAL_BUILD_UNSUPPORTED'), (None, 'TERMINAL_BUILD_UNAVAILABLE')):
+            windows.return_value.terminal_build.return_value = build
+            result = collect_inventory('terminal64.exe', '.', inspect_ui=True)
+            self.assertEqual(result['status'], 'ERROR')
+            self.assertEqual(result['errorCode'], code)
+            self.assertEqual(result['processIdentity'], '12:34')
+        fingerprint.assert_not_called()
+        windows.return_value.visible_servers.assert_not_called()
 
 
 class AgentTests(unittest.TestCase):

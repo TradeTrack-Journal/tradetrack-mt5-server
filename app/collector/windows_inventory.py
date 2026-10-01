@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 import time
 from threading import Lock
+from .terminal_build import VERIFIED_BUILDS, file_build
 
 
 # MT5 modal inventory in two worker threads can stall the Windows message
@@ -32,7 +33,7 @@ def read_only_caption_matches(caption, login, server, build):
     """
     # Builds 6204/6230 verified on Headway/Exness/FundingPips, 2026-09-27.
     # Build 6231 verified on BrightFunded/MetaQuotes/Exness, 2026-10-01.
-    if type(build) is not int or build not in (6182, 6190, 6193, 6204, 6230, 6231):
+    if type(build) is not int or build not in VERIFIED_BUILDS:
         return False
     prefix = f"{login} - {server}: "
     mode = r"(Hedge|Netting)" if build == 6182 else "Hedge"
@@ -154,6 +155,9 @@ class WindowsTerminal:
         buffer = c.create_unicode_buffer(256)
         self.u.GetClassNameW(hwnd, buffer, len(buffer))
         return buffer.value
+
+    def terminal_build(self, executable):
+        return file_build(executable)
 
     def read_only_session(self, pid, executable, identity, login, server, build):
         if self.process_identity(pid, executable) != identity:
@@ -355,6 +359,15 @@ def collect_inventory(executable, data_path, inspect_ui=False):
     pid, identity = windows.find_process(executable)
     if pid is None:
         return {"status": "OFFLINE", "processId": None, "processIdentity": None, "catalogHash": None, "serverNames": [], "verificationMethod": "none", "errorCode": None}
+    build = windows.terminal_build(executable)
+    if type(build) is not int or build not in VERIFIED_BUILDS:
+        # Block this slot before claim/credentials, preserving every account's state.
+        # Unknown builds still require an explicit compatibility review.
+        if windows.process_identity(pid, executable) != identity:
+            raise InventoryError("TERMINAL_CHANGED")
+        return {"status": "ERROR", "processId": pid, "processIdentity": identity,
+                "catalogHash": None, "serverNames": [], "verificationMethod": "none",
+                "errorCode": "TERMINAL_BUILD_UNSUPPORTED" if build is not None else "TERMINAL_BUILD_UNAVAILABLE"}
     fingerprint = catalogue_fingerprint(data_path)
     names = windows.visible_servers(pid, executable, identity, managed_login=True) if inspect_ui else []
     if catalogue_fingerprint(data_path) != fingerprint or windows.process_identity(pid, executable) != identity:
