@@ -25,7 +25,7 @@ class SlotState:
 
 
 def run_slots(workers, emit, preparation=None, once=False, stop=lambda: False,
-              poll_seconds=1, interval=10, clock=time.monotonic, sleep=time.sleep):
+              poll_seconds=0.25, interval=10, clock=time.monotonic, sleep=time.sleep):
     """At most one future per slot. Never inspect/prepare a slot with a live future.
 
     A drain stops new dispatch, then waits for bounded children/HTTP calls. No
@@ -56,7 +56,12 @@ def run_slots(workers, emit, preparation=None, once=False, stop=lambda: False,
                     result = state.future.result()
                     emit(dict(result, durationMs=round((clock() - state.started) * 1000)))
                     state.failures = 0
-                    state.due = clock() + (min(1, interval) if result.get('state') == 'maintenance_required' else interval)
+                    # The API owns per-account cadence. A successful slot can serve
+                    # the next queued account immediately; idle/error slots still
+                    # back off so an empty queue cannot create a claim-request loop.
+                    outcome = result.get('state')
+                    delay = 0 if outcome == 'collected' else min(1, interval) if outcome == 'maintenance_required' else interval
+                    state.due = clock() + delay
                     state.finished = once
                 except Exception as error:
                     defer(state, error)

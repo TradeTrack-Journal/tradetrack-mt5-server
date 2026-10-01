@@ -35,6 +35,29 @@ class Worker:
 
 
 class SchedulerTests(unittest.TestCase):
+    def test_backlog_drains_without_success_cooldown_but_idle_and_failure_wait(self):
+        import time
+        for middle, minimum in [('collected', 0), ('idle', 10), ('failed', 10)]:
+            with self.subTest(middle=middle):
+                output, called_at = [], []
+                now = [0.0]
+                worker = Worker('queue', lambda: None)
+                def once(allow_ui):
+                    called_at.append(now[0])
+                    return {'slotId': 'queue', 'state': middle if len(called_at) == 1 else 'collected'}
+                worker.once = once
+                def tick(seconds):
+                    now[0] += .25
+                    time.sleep(.001)
+                run_slots([worker], output.append, stop=lambda: len(output) >= 2,
+                          clock=lambda: now[0], sleep=tick)
+                elapsed = called_at[1] - called_at[0]
+                if minimum:
+                    self.assertGreaterEqual(elapsed, minimum)
+                else:
+                    self.assertLess(elapsed, 2)
+                self.assertEqual(worker.connects, 1)
+
     def test_catalog_refresh_does_not_wait_for_failure_backoff_or_reconnect(self):
         output, called_at = [], []
         now = [0.0]
