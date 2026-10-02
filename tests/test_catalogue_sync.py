@@ -95,3 +95,25 @@ class CatalogueSyncTests(unittest.TestCase):
             install_catalogue(self.target, b'new', {'OctaFX-Real'}, 6231)
         self.target.client.call.assert_not_called()
         self.assertFalse((self.root / 'server-catalogs').exists())
+
+    def test_hung_close_uses_exact_fenced_process_and_still_installs(self):
+        self.target.windows.find_process.side_effect = [(12, '12:34'), (12, '12:34'), (None, None)]
+        self.target.client.call.side_effect = [None, {'slots': [
+            {'id': 'demo-02', 'quarantineIdentity': '12:34', 'generation': 'generation'}]}]
+        with patch('app.collector.catalogue_sync.close_terminal', side_effect=InventoryError('TERMINAL_STOP_TIMEOUT')), \
+                patch('app.collector.catalogue_sync.terminate_verified') as terminate, \
+                patch('app.collector.catalogue_sync.start_terminal', return_value=True):
+            result = synchronize_once([self.source, self.target])
+            terminate.assert_called_once_with(self.target.windows, Path(self.target.slot['executablePath']).resolve(), 12, '12:34')
+        self.assertTrue(result['terminalStarted'])
+        self.assertEqual(Path(self.target.slot['dataPath'], 'config/servers.dat').read_bytes(), b'new')
+
+    def test_fence_change_during_hung_close_never_terminates_or_writes(self):
+        self.target.client.call.side_effect = [None, {'slots': [
+            {'id': 'demo-02', 'quarantineIdentity': 'replacement', 'generation': 'generation'}]}]
+        with patch('app.collector.catalogue_sync.close_terminal', side_effect=InventoryError('TERMINAL_STOP_TIMEOUT')), \
+                patch('app.collector.catalogue_sync.terminate_verified') as terminate:
+            with self.assertRaisesRegex(InventoryError, 'TERMINAL_CHANGED'):
+                synchronize_once([self.source, self.target])
+            terminate.assert_not_called()
+        self.assertEqual(Path(self.target.slot['dataPath'], 'config/servers.dat').read_bytes(), b'old')
