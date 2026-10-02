@@ -80,6 +80,12 @@ class ServerPreparation:
     def once(self, workers):
         if not workers:
             return None
+        # A newly discovered name in any idle slot propagates without waiting
+        # for another user to request it. Keep all existing names and builds.
+        from .catalogue_sync import synchronize_once
+        synchronized = synchronize_once(workers)
+        if synchronized:
+            return synchronized
         requests = workers[0].client.call('/config').get('preparationRequests', [])
         for request in requests[:100]:
             server, company = request.get('serverName'), request.get('company')

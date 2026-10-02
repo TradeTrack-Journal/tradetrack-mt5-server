@@ -293,7 +293,7 @@ class WindowsTerminal:
             self.defer_live_update(pid, executable, identity, mains[0], leaves[0], managed_login=managed_login)
         raise InventoryError("TERMINAL_UI_BUSY")
 
-    def visible_servers(self, pid, executable, identity, managed_login=False):
+    def visible_servers(self, pid, executable, identity, managed_login=False, dialog_timeout=3):
         """Open only our own login dialog, read only its Server combo, cancel it."""
         with _inventory_ui_lock, self.inventory_lock(executable):
             before, main = self.prepare_login_window(pid, executable, identity, managed_login)
@@ -306,7 +306,7 @@ class WindowsTerminal:
             if not self.u.PostMessageW(main, 0x111, commands[0], 0):
                 raise InventoryError("UI_COMMAND_FAILED")
             try:
-                deadline = time.monotonic() + 3
+                deadline = time.monotonic() + min(10, max(3, dialog_timeout))
                 while time.monotonic() < deadline:
                     dialogs = [h for h in self.windows(pid) if h not in before and self.class_name(h) == "#32770" and self.u.IsWindowVisible(h) and self.owned_by_main(pid, main, h)]
                     if len(dialogs) == 1:

@@ -53,7 +53,7 @@ class ServerBuilder(WindowsTerminal):
         # Reuse an already prepared catalog before opening the company wizard.
         # Names still come from the live terminal, never from the central DB.
         try:
-            known = self.visible_servers(pid, str(path), identity)
+            known = self.visible_servers(pid, str(path), identity, managed_login=True, dialog_timeout=10)
             if server in known:
                 return {'serverName': server, 'state': 'PRESENT', 'verificationMethod': 'login_dialog', 'serverNames': known}
         except InventoryError as exc:
@@ -132,5 +132,5 @@ class ServerBuilder(WindowsTerminal):
                         time.sleep(0.05)
                     if self.u.IsWindow(dialog) and self.u.IsWindowVisible(dialog):
                         raise InventoryError('UI_CLEANUP_FAILED')
-        names = self.visible_servers(pid, str(path), identity)
+        names = self.visible_servers(pid, str(path), identity, managed_login=True, dialog_timeout=10)
         return {'serverName': server, 'state': 'PRESENT' if server in names else 'SERVER_NOT_FOUND', 'verificationMethod': 'login_dialog', 'serverNames': names}
