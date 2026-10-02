@@ -67,14 +67,14 @@ def login_failure(native, data_path, baseline, login, server, *, settle_seconds=
     code = connection_error(native)
     if code != 'AUTH_FAILED' or baseline is None:
         return code
-    # MT5 also uses -6 during access-point/server switching. Only this exact,
-    # fresh pair proves a transport synchronization error, not bad credentials.
+    # MT5 also uses -6 during access-point/server switching. Require exact,
+    # fresh transport evidence, or an explicit service-unavailable response.
     # This merely requests a later retry: identity and access gates stay intact.
     # Journal writes can lag the failed native call. Wait boundedly for the
     # original snapshot's evidence; never retry login or read account history here.
     deadline = time.monotonic() + settle_seconds
     while True:
-        sync_failed = common_error = False
+        sync_failed = common_error = service_unavailable = False
         try:
             for line in fresh_journal_lines(data_path, baseline):
                 fields = line.split('\t')
@@ -83,14 +83,16 @@ def login_failure(native, data_path, baseline, login, server, *, settle_seconds=
                 source, message = fields[-2], fields[-1].strip()
                 sync_failed |= source == server and message == f"'{login}': error sending synchronization command"
                 common_message = f"'{login}': authorization on {server} failed (Common error)"
+                unavailable_message = f"'{login}': authorization on {server} failed (Service is not available)"
                 if (source == 'Network' and
                         message.startswith(f"'{login}': authorization on {server} failed (") and
-                        message != common_message):
+                        message not in (common_message, unavailable_message)):
                     return code  # Explicit rejection takes precedence over transport evidence.
                 common_error |= source == 'Network' and message == common_message
+                service_unavailable |= source == 'Network' and message == unavailable_message
         except (OSError, UnicodeError, CollectionError):
             return code
-        if sync_failed and common_error:
+        if service_unavailable or (sync_failed and common_error):
             return 'NETWORK_UNAVAILABLE'
         remaining = deadline - time.monotonic()
         if remaining <= 0:

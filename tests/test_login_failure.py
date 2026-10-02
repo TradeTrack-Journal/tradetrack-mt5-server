@@ -38,6 +38,33 @@ class LoginFailureTests(unittest.TestCase):
                             "OQ\t2\ttime\tNetwork\t'12345': authorization on Example-Real failed (Invalid account)\r\n", encoding='utf-16')
             self.assertEqual(login_failure(native, root, baseline, '12345', 'Example-Real', settle_seconds=0), 'AUTH_FAILED')
 
+    def test_service_unavailable_requires_fresh_exact_account_server_source(self):
+        native = Mock(last_error=Mock(return_value=(-6, 'private')))
+        line = "CN\t2\ttime\tNetwork\t'12345': authorization on Example-Real failed (Service is not available)\r\n"
+        with tempfile.TemporaryDirectory() as root:
+            folder = Path(root) / 'logs'; folder.mkdir()
+            path = folder / '20261002.log'
+            path.write_text(line, encoding='utf-16')
+            baseline = journal_baseline(root)
+            classify = lambda login='12345', server='Example-Real': login_failure(native, root, baseline, login, server, settle_seconds=0)
+            self.assertEqual(classify(), 'AUTH_FAILED')
+            with path.open('ab') as out:
+                out.write(line.replace('Network', 'Other').encode('utf-16-le'))
+            self.assertEqual(classify(), 'AUTH_FAILED')
+            with path.open('ab') as out:
+                out.write(line.encode('utf-16-le'))
+            self.assertEqual(classify(), 'NETWORK_UNAVAILABLE')
+            self.assertEqual(classify(login='54321'), 'AUTH_FAILED')
+            self.assertEqual(classify(server='Other-Real'), 'AUTH_FAILED')
+
+    def test_service_unavailable_never_overrides_explicit_rejection(self):
+        native = Mock(last_error=Mock(return_value=(-6, 'private')))
+        unavailable = "CN\t2\ttime\tNetwork\t'12345': authorization on Example-Real failed (Service is not available)"
+        rejected = unavailable.replace('Service is not available', 'Invalid account')
+        for lines in ([unavailable, rejected], [rejected, unavailable]):
+            with self.subTest(lines=lines), patch('app.collector.gateway.fresh_journal_lines', return_value=lines):
+                self.assertEqual(login_failure(native, '.', {}, '12345', 'Example-Real'), 'AUTH_FAILED')
+
     def test_rotated_or_unreadable_evidence_keeps_auth_failure(self):
         native = Mock(last_error=Mock(return_value=(-6, 'private native text')))
         with tempfile.TemporaryDirectory() as root:
