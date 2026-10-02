@@ -21,7 +21,7 @@ def main():
     args = parser.parse_args()
     config = load_config(args.config)
     token = os.environ.pop('MT5_AGENT_TOKEN', '')
-    telemetry.initialize()
+    telemetry.initialize(Path(args.config).resolve().parent / 'telemetry-state.sqlite3')
     retry_at = {}
 
     def emit(result):

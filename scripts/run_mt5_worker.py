@@ -57,7 +57,7 @@ def main():
     if args.child:
         child()
         return
-    telemetry.initialize()
+    telemetry.initialize(Path(args.config).resolve().parent / 'telemetry-state.sqlite3' if args.config else None)
     from app.collector.node_agent import load_config
     from app.collector.worker import SlotWorker
     if not args.config:
