@@ -1,4 +1,5 @@
 import json
+from io import BytesIO
 from pathlib import Path
 import tempfile
 import unittest
@@ -78,6 +79,23 @@ class InventoryTests(unittest.TestCase):
 
 
 class AgentTests(unittest.TestCase):
+    def test_http_conflict_preserves_only_allowlisted_reason_and_operation(self):
+        client = NodeClient('https://api.example', 'node-1', 'a' * 43)
+        bodies = [(b'{"message":"LEASE_LOST","password":"SECRET"}', 'LEASE_LOST'),
+                  (b'{"message":"SECRET"}', None), (b'<html>SECRET</html>', None),
+                  (b'{"message":["SECRET"]}', None),
+                  (b'{"message":"LEASE_LOST","padding":"' + b'x' * 4096 + b'"}', None)]
+        for body, expected in bodies:
+            with self.subTest(expected=expected, length=len(body)):
+                stream = BytesIO(body)
+                client.opener.open = MagicMock(side_effect=HTTPError('https://api.example', 409, 'SECRET', {}, stream))
+                with self.assertRaisesRegex(AgentError, '^API_HTTP_409$') as caught:
+                    client.call('/slots/slot-1/jobs/job-1/complete', {'leaseToken': 'SECRET'})
+                self.assertEqual(caught.exception.operation, 'complete')
+                self.assertEqual(caught.exception.reason, expected)
+                self.assertNotIn('SECRET', str(vars(caught.exception)))
+                self.assertTrue(stream.closed)
+
     def test_large_inventory_is_bounded_without_relaxing_job_limits(self):
         client = NodeClient('https://api.example', 'node-1', 'a' * 43)
         response = MagicMock()

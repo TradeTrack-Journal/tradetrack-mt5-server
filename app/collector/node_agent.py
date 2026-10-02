@@ -10,12 +10,27 @@ from urllib import error, parse, request
 from uuid import uuid4
 
 from app.collector.windows_inventory import InventoryError, collect_inventory
+from app.collector.diagnostics import API_REASONS, api_fields
 
 
 class AgentError(Exception):
-    def __init__(self, code, operation=None):
+    def __init__(self, code, operation=None, reason=None):
         super().__init__(code)
-        self.operation = operation
+        fields = api_fields(operation, reason)
+        self.operation = fields.get('operation')
+        self.reason = fields.get('apiReason')
+
+
+def response_reason(response):
+    try:
+        raw = response.read(4097)
+        if len(raw) > 4096:
+            return None
+        body = json.loads(raw)
+        reason = body.get('message') if isinstance(body, dict) else None
+        return reason if isinstance(reason, str) and reason in API_REASONS else None
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
 
 
 class NoRedirect(request.HTTPRedirectHandler):
@@ -52,26 +67,27 @@ class NodeClient:
                 with self.opener.open(req, timeout=10) as response:
                     raw = response.read(response_limit + 1)
                 if len(raw) > response_limit:
-                    raise AgentError("API_RESPONSE_LIMIT")
+                    raise AgentError("API_RESPONSE_LIMIT", operation)
                 result = json.loads(raw)
                 if not isinstance(result, dict):
-                    raise AgentError("API_RESPONSE_INVALID")
+                    raise AgentError("API_RESPONSE_INVALID", operation)
                 return result
             except error.HTTPError as exc:
                 status = exc.code
                 retry_after = exc.headers.get("Retry-After", "")
+                reason = response_reason(exc)
                 exc.close()
                 if status not in (429, 500, 502, 503, 504) or attempt == 2:
-                    raise AgentError(f"API_HTTP_{status}", operation) from None
+                    raise AgentError(f"API_HTTP_{status}", operation, reason) from None
                 if retry_after.isdigit():
                     if int(retry_after) > 10:
-                        raise AgentError("API_RETRY_LATER") from None
+                        raise AgentError("API_RETRY_LATER", operation) from None
                     retry_delay = max(retry_delay, int(retry_after))
             except (OSError, error.URLError):
                 if attempt == 2:
-                    raise AgentError("API_UNAVAILABLE") from None
+                    raise AgentError("API_UNAVAILABLE", operation) from None
             except (ValueError, UnicodeError):
-                raise AgentError("API_RESPONSE_INVALID") from None
+                raise AgentError("API_RESPONSE_INVALID", operation) from None
             time.sleep(retry_delay)
         raise AgentError("API_UNAVAILABLE")
 

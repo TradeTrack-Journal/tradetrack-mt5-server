@@ -6,6 +6,7 @@ from pathlib import Path
 from contextlib import closing
 import threading
 import time
+from .diagnostics import api_fields, explanation
 
 _sdk = None
 _seen = {}
@@ -57,16 +58,22 @@ def sanitize(event, hint):
     code = tags.get('error_code', '')
     if not re.fullmatch(r'[A-Z][A-Z0-9_]{0,63}', code):
         return None
+    details = api_fields(tags.get('operation'), tags.get('api_reason'))
+    reason = details.get('apiReason')
+    message = 'MT5 worker: ' + code + (': ' + reason if reason else '') + '. ' + explanation(code, reason)
     return {
         'event_id': event.get('event_id'),
         'timestamp': event.get('timestamp'),
         'environment': 'production',
         'platform': 'python',
         'level': 'info' if code == 'MONITORING_CHECK' else 'error',
-        'message': 'MT5 worker: ' + code,
+        'logentry': {'message': message, 'formatted': message},
+        'contexts': {'mt5_diagnostics': {'type': 'mt5_diagnostics', **details, 'explanation': explanation(code, reason)}},
         'fingerprint': ['mt5-worker', code],
         'tags': {'component': 'mt5-worker', 'error_code': code,
-                 'slot': safe_slot(tags.get('slot'))},
+                 'slot': safe_slot(tags.get('slot')),
+                 **({'operation': details['operation']} if 'operation' in details else {}),
+                 **({'api_reason': reason} if reason else {})},
     }
 
 
@@ -120,7 +127,9 @@ def report(result):
                     return
             if not reserve_event(code, time.time()):
                 return
-        return _sdk.capture_event({'tags': {'error_code': code, 'slot': slot}})
+        details = api_fields(result.get('operation'), result.get('apiReason'))
+        return _sdk.capture_event({'tags': {'error_code': code, 'slot': slot,
+                                          'operation': details.get('operation'), 'api_reason': details.get('apiReason')}})
     except Exception:
         return None
 

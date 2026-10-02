@@ -35,6 +35,15 @@ class Worker:
 
 
 class SchedulerTests(unittest.TestCase):
+    def test_api_conflict_details_survive_scheduler_without_raw_text(self):
+        output = []
+        def conflict():
+            raise AgentError('API_HTTP_409', 'complete', 'LEASE_LOST')
+        run_slots([Worker('demo-10', conflict)], output.append, once=True, poll_seconds=.001)
+        self.assertEqual(output[0]['operation'], 'complete')
+        self.assertEqual(output[0]['apiReason'], 'LEASE_LOST')
+        self.assertEqual(output[0]['errorCode'], 'API_HTTP_409')
+
     def test_catalogue_preparation_can_use_slots_in_claim_cooldown(self):
         import time
         output, prepared = [], []

@@ -6,6 +6,7 @@ import time
 
 from .node_agent import AgentError
 from .windows_inventory import InventoryError
+from .diagnostics import error_fields
 
 
 def error_code(error):
@@ -45,7 +46,7 @@ def run_slots(workers, emit, preparation=None, once=False, stop=lambda: False,
         state.connected = False
         state.finished = once
         failed = True
-        emit({'slotId': state.worker.slot['id'], 'state': 'retrying', 'errorCode': code})
+        emit({'slotId': state.worker.slot['id'], 'state': 'retrying', 'errorCode': code, **error_fields(error)})
 
     with ThreadPoolExecutor(max_workers=len(states)) as pool:
         while True:
@@ -87,7 +88,7 @@ def run_slots(workers, emit, preparation=None, once=False, stop=lambda: False,
                     if result:
                         emit(result)
                 except Exception as error:
-                    emit({'state': 'SERVER_PREPARATION_RETRY', 'errorCode': error_code(error)})
+                    emit({'state': 'SERVER_PREPARATION_RETRY', 'errorCode': error_code(error), **error_fields(error)})
 
             for state in idle:
                 if stop():

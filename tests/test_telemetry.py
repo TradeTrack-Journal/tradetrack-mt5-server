@@ -6,6 +6,31 @@ from app.collector import telemetry
 
 
 class TelemetryTests(unittest.TestCase):
+    def test_explanation_and_api_context_survive_sanitization_without_secrets(self):
+        event = telemetry.sanitize({'tags': {'error_code': 'API_HTTP_409', 'slot': 'demo-10',
+                                            'operation': 'complete', 'api_reason': 'LEASE_LOST'},
+                                    'message': 'SECRET', 'request': {'body': 'SECRET'},
+                                    'contexts': {'native': 'SECRET'}}, {})
+        self.assertEqual(event['tags']['operation'], 'complete')
+        self.assertEqual(event['tags']['api_reason'], 'LEASE_LOST')
+        self.assertIn('lease expired', event['logentry']['formatted'])
+        self.assertNotIn('SECRET', str(event))
+        self.assertEqual(event['fingerprint'], ['mt5-worker', 'API_HTTP_409'])
+        event = telemetry.sanitize({'tags': {'error_code': 'API_HTTP_409', 'operation': 'SECRET', 'api_reason': 'SECRET'}}, {})
+        self.assertNotIn('SECRET', str(event))
+        self.assertNotIn('api_reason', event['tags'])
+
+    def test_report_preserves_safe_details_without_bypassing_transient_filter(self):
+        sdk = Mock()
+        with patch.object(telemetry, '_sdk', sdk), patch.object(telemetry.time, 'monotonic') as clock:
+            for now in [0, 90, 180]:
+                clock.return_value = now
+                telemetry.report({'errorCode': 'API_HTTP_409', 'slotId': 'demo-10', 'operation': 'report', 'apiReason': 'SESSION_CHANGED', 'raw': 'SECRET'})
+            sdk.capture_event.assert_called_once()
+            event = telemetry.sanitize(sdk.capture_event.call_args.args[0], {})
+            self.assertEqual(event['tags']['api_reason'], 'SESSION_CHANGED')
+            self.assertNotIn('SECRET', str(event))
+
     def setUp(self):
         for name, value in [('_seen', {}), ('_pending', {}), ('_state_path', None)]:
             patcher = patch.object(telemetry, name, value)
