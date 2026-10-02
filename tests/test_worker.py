@@ -166,10 +166,20 @@ class GatewayTests(unittest.TestCase):
     def test_explicit_auth_failure_is_not_treated_as_network(self):
         self.native.login.return_value = False
         self.native.last_error.return_value = (-6, 'synthetic secret broker text')
-        with self.assertRaisesRegex(CollectionError, '^AUTH_FAILED$'):
+        with patch('app.collector.gateway.time.monotonic', side_effect=[0, 4]), self.assertRaisesRegex(CollectionError, '^AUTH_FAILED$'):
             collect(self.request, self.native, self.windows)
         self.native.history_deals_get.assert_not_called()
         self.assertNotIn('investorPassword', self.request['credentials'])
+
+    def test_transport_login_failure_still_blocks_all_data_reads(self):
+        self.native.login.return_value = False
+        with patch('app.collector.gateway.login_failure', return_value='NETWORK_UNAVAILABLE'):
+            with self.assertRaisesRegex(CollectionError, '^NETWORK_UNAVAILABLE$'):
+                collect(self.request, self.native, self.windows)
+        self.native.account_info.assert_not_called()
+        self.native.history_deals_get.assert_not_called()
+        self.native.positions_get.assert_not_called()
+        self.native.shutdown.assert_called_once()
 
     def test_ipc_timeout_requires_terminal_recovery(self):
         self.native.initialize.return_value = False

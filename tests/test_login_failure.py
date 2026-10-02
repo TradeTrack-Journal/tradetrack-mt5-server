@@ -1,7 +1,7 @@
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from app.collector.gateway import journal_baseline, login_failure
 
@@ -16,7 +16,7 @@ class LoginFailureTests(unittest.TestCase):
             path = folder / '20261001.log'
             path.write_text(sync + common, encoding='utf-16')
             baseline = journal_baseline(root)
-            classify = lambda login='12345', server='Example-Real': login_failure(native, root, baseline, login, server)
+            classify = lambda login='12345', server='Example-Real': login_failure(native, root, baseline, login, server, settle_seconds=0)
             self.assertEqual(classify(), 'AUTH_FAILED')  # old evidence
             with path.open('ab') as out:
                 out.write(common.encode('utf-16-le'))
@@ -36,7 +36,7 @@ class LoginFailureTests(unittest.TestCase):
             path = folder / '20261001.log'
             path.write_text("KD\t2\ttime\tExample-Real\t'12345': error sending synchronization command\r\n"
                             "OQ\t2\ttime\tNetwork\t'12345': authorization on Example-Real failed (Invalid account)\r\n", encoding='utf-16')
-            self.assertEqual(login_failure(native, root, baseline, '12345', 'Example-Real'), 'AUTH_FAILED')
+            self.assertEqual(login_failure(native, root, baseline, '12345', 'Example-Real', settle_seconds=0), 'AUTH_FAILED')
 
     def test_rotated_or_unreadable_evidence_keeps_auth_failure(self):
         native = Mock(last_error=Mock(return_value=(-6, 'private native text')))
@@ -46,3 +46,38 @@ class LoginFailureTests(unittest.TestCase):
             baseline = journal_baseline(root)
             path.write_bytes(b'')
             self.assertEqual(login_failure(native, root, baseline, '12345', 'Example-Real'), 'AUTH_FAILED')
+
+    def test_delayed_flush_uses_original_baseline_and_error(self):
+        native = Mock(last_error=Mock(side_effect=[(-6, 'private'), (1, 'success')]))
+        with tempfile.TemporaryDirectory() as root:
+            folder = Path(root) / 'logs'; folder.mkdir()
+            path = folder / '20261002.log'
+            path.write_text('', encoding='utf-16')
+            baseline = journal_baseline(root)
+            def flush(_):
+                with path.open('ab') as out:
+                    out.write(("KD\t2\ttime\tExample-Real\t'12345': error sending synchronization command\r\n"
+                               "OQ\t2\ttime\tNetwork\t'12345': authorization on Example-Real failed (Common error)\r\n").encode('utf-16-le'))
+            with patch('app.collector.gateway.time.sleep', side_effect=flush) as sleep:
+                self.assertEqual(login_failure(native, root, baseline, '12345', 'Example-Real'), 'NETWORK_UNAVAILABLE')
+            sleep.assert_called_once()
+            native.last_error.assert_called_once()
+            native.login.assert_not_called()
+            native.history_deals_get.assert_not_called()
+
+    def test_no_evidence_stops_at_deadline(self):
+        native = Mock(last_error=Mock(return_value=(-6, 'private')))
+        with patch('app.collector.gateway.fresh_journal_lines', return_value=[]), \
+                patch('app.collector.gateway.time.monotonic', side_effect=[10, 11, 13]), \
+                patch('app.collector.gateway.time.sleep') as sleep:
+            self.assertEqual(login_failure(native, '.', {}, '12345', 'Example-Real'), 'AUTH_FAILED')
+        sleep.assert_called_once_with(0.1)
+        native.last_error.assert_called_once()
+
+    def test_explicit_rejection_overrides_matching_transport_pair(self):
+        native = Mock(last_error=Mock(return_value=(-6, 'private')))
+        lines = ["KD\t2\ttime\tExample-Real\t'12345': error sending synchronization command",
+                 "OQ\t2\ttime\tNetwork\t'12345': authorization on Example-Real failed (Common error)",
+                 "OQ\t2\ttime\tNetwork\t'12345': authorization on Example-Real failed (Invalid account)"]
+        with patch('app.collector.gateway.fresh_journal_lines', return_value=lines):
+            self.assertEqual(login_failure(native, '.', {}, '12345', 'Example-Real'), 'AUTH_FAILED')
