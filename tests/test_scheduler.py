@@ -35,6 +35,26 @@ class Worker:
 
 
 class SchedulerTests(unittest.TestCase):
+    def test_catalogue_preparation_can_use_slots_in_claim_cooldown(self):
+        import time
+        output, prepared = [], []
+        now = [0.0]
+        workers = [Worker('source', lambda: None), Worker('target', lambda: None)]
+        for worker in workers:
+            worker.once = lambda allow_ui: {'state': 'idle'}
+        class Preparation:
+            def once(inner, available):
+                if len(output) == 2:
+                    prepared.append([w.slot['id'] for w in available])
+        def tick(seconds):
+            now[0] += .25
+            time.sleep(.001)
+        run_slots(workers, output.append, Preparation(),
+                  stop=lambda: bool(prepared) or now[0] > 5,
+                  clock=lambda: now[0], sleep=tick)
+        self.assertEqual(prepared, [['source', 'target']])
+        self.assertEqual(len(output), 2, 'preparation should happen before another claim')
+
     def test_backlog_drains_without_success_cooldown_but_idle_and_failure_wait(self):
         import time
         for middle, minimum in [('collected', 0), ('idle', 10), ('failed', 10)]:

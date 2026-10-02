@@ -76,7 +76,10 @@ def run_slots(workers, emit, preparation=None, once=False, stop=lambda: False,
                 continue
 
             idle = [s for s in states if s.future is None and not s.finished and s.due <= clock()]
-            inspected = [s.worker for s in idle if s.connected and s.worker.inspected_at]
+            # Claim cooldown is not a running job. Include all free, inspected
+            # slots so staggered claim timers cannot starve catalogue propagation.
+            inspected = [s.worker for s in states if s.future is None and not s.finished
+                         and s.connected and s.worker.inspected_at]
             if preparation and inspected and clock() >= preparation_at:
                 preparation_at = clock() + 30
                 try:
