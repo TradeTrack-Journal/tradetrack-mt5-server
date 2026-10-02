@@ -9,6 +9,7 @@ import time
 from app.collector import telemetry
 from app.collector.node_agent import AgentError, InventoryAgent, load_config
 from app.collector.quarantine_recovery import recover_quarantined
+from app.collector.scheduler import error_code
 from app.collector.windows_inventory import InventoryError
 
 
@@ -37,10 +38,15 @@ def main():
             config = load_config(args.config)
             agent = InventoryAgent(config, token)
             agent.connect()
-            inventory = agent.client.call('/inventory')
-            emit({'state': 'health', 'slots': [
-                {k: s.get(k) for k in ('id', 'status', 'lastHeartbeat', 'errorCode')}
-                for s in inventory.get('slots', [])]})
+            try:
+                inventory = agent.client.call('/inventory')
+                emit({'state': 'health', 'slots': [
+                    {k: s.get(k) for k in ('id', 'status', 'lastHeartbeat', 'errorCode')}
+                    for s in inventory.get('slots', [])]})
+            except AgentError as exc:
+                # Detailed status is diagnostic only. Recovery rechecks the
+                # authoritative config fence under the slot lock itself.
+                emit({'state': 'inventory_unavailable', 'errorCode': error_code(exc)})
             for slot in config['slots']:
                 if not agent.remote_slots[slot['id']].get('quarantineIdentity'):
                     continue
@@ -53,8 +59,8 @@ def main():
                 except (AgentError, InventoryError) as exc:
                     retry_at[slot['id']] = time.monotonic() + 60
                     emit({'slotId': slot['id'], 'state': 'recovery_deferred', 'errorCode': str(exc)})
-        except (AgentError, InventoryError):
-            emit({'state': 'health_unavailable', 'errorCode': 'HEALTH_API_UNAVAILABLE'})
+        except (AgentError, InventoryError) as exc:
+            emit({'state': 'health_unavailable', 'errorCode': 'HEALTH_API_UNAVAILABLE', 'cause': error_code(exc)})
         if args.once:
             break
         time.sleep(45)

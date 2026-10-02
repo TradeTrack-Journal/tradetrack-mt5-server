@@ -78,6 +78,22 @@ class InventoryTests(unittest.TestCase):
 
 
 class AgentTests(unittest.TestCase):
+    def test_large_inventory_is_bounded_without_relaxing_job_limits(self):
+        client = NodeClient('https://api.example', 'node-1', 'a' * 43)
+        response = MagicMock()
+        reader = response.__enter__.return_value.read
+        reader.return_value = json.dumps({'catalogue': 'x' * (600 * 1024)}).encode()
+        client.opener.open = MagicMock(return_value=response)
+        self.assertIn('catalogue', client.call('/inventory'))
+        reader.assert_called_with(16 * 1024 * 1024 + 1)
+        for suffix in ['/config', '/slots/slot-1/jobs/job-1/credentials']:
+            with self.assertRaisesRegex(AgentError, '^API_RESPONSE_LIMIT$'):
+                client.call(suffix)
+            reader.assert_called_with(512 * 1024 + 1)
+        reader.return_value = b'x' * (16 * 1024 * 1024 + 1)
+        with self.assertRaisesRegex(AgentError, '^API_RESPONSE_LIMIT$'):
+            client.call('/inventory')
+
     def test_transport_rejects_plaintext_and_credentials_in_url(self):
         for url in ("http://example.com", "https://user:secret@example.com", "https://example.com?token=a"):
             with self.assertRaises(AgentError):

@@ -39,6 +39,10 @@ class NodeClient:
     def call(self, suffix, payload=None):
         data = None if payload is None else json.dumps(payload, separators=(",", ":")).encode()
         operation = suffix.rsplit('/', 1)[-1]
+        # Inventory contains up to 16 slots with 2000 server states each.
+        # Keep account/job responses small; only this public catalogue gets a
+        # larger bounded read so watchdog recovery survives directory growth.
+        response_limit = 16 * 1024 * 1024 if suffix == '/inventory' and payload is None else 512 * 1024
         if operation not in {'config', 'inventory', 'session', 'report', 'claim', 'credentials', 'heartbeat', 'complete', 'fail', 'prepare', 'preparation-missing'}:
             operation = 'request'
         for attempt in range(3):
@@ -46,8 +50,8 @@ class NodeClient:
             retry_delay = min(2 ** attempt, 4)
             try:
                 with self.opener.open(req, timeout=10) as response:
-                    raw = response.read(512 * 1024 + 1)
-                if len(raw) > 512 * 1024:
+                    raw = response.read(response_limit + 1)
+                if len(raw) > response_limit:
                     raise AgentError("API_RESPONSE_LIMIT")
                 result = json.loads(raw)
                 if not isinstance(result, dict):
