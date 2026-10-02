@@ -6,7 +6,7 @@ from pathlib import Path
 from contextlib import closing
 import threading
 import time
-from .diagnostics import api_fields, explanation
+from .diagnostics import CRITICAL_API_REASONS, api_fields, explanation
 
 _sdk = None
 _seen = {}
@@ -69,7 +69,7 @@ def sanitize(event, hint):
         'level': 'info' if code == 'MONITORING_CHECK' else 'error',
         'logentry': {'message': message, 'formatted': message},
         'contexts': {'mt5_diagnostics': {'type': 'mt5_diagnostics', **details, 'explanation': explanation(code, reason)}},
-        'fingerprint': ['mt5-worker', code],
+        'fingerprint': ['mt5-worker', code] + ([reason] if reason in CRITICAL_API_REASONS else []),
         'tags': {'component': 'mt5-worker', 'error_code': code,
                  'slot': safe_slot(tags.get('slot')),
                  **({'operation': details['operation']} if 'operation' in details else {}),
@@ -113,10 +113,13 @@ def report(result):
             code = 'WORKER_FAILED'
         if code in LOCAL_ONLY:
             return
+        details = api_fields(result.get('operation'), result.get('apiReason'))
+        reason = details.get('apiReason')
+        critical = reason in CRITICAL_API_REASONS
         key = (code, slot)
         with _lock:
             now = time.monotonic()
-            if code in TRANSIENT or code.startswith('DISCOVERY_UI_BUSY_'):
+            if not critical and (code in TRANSIENT or code.startswith('DISCOVERY_UI_BUSY_')):
                 first, last, count = _pending.get(key, (now, now, 0))
                 if now - last > 300:
                     first, count = now, 0
@@ -125,9 +128,8 @@ def report(result):
                 _pending[key] = (first, now, count + 1)
                 if count + 1 < 3 or now - first < TRANSIENT_SECONDS:
                     return
-            if not reserve_event(code, time.time()):
+            if not reserve_event(code + ':' + reason if critical else code, time.time()):
                 return
-        details = api_fields(result.get('operation'), result.get('apiReason'))
         return _sdk.capture_event({'tags': {'error_code': code, 'slot': slot,
                                           'operation': details.get('operation'), 'api_reason': details.get('apiReason')}})
     except Exception:

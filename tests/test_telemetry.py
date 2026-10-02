@@ -6,6 +6,17 @@ from app.collector import telemetry
 
 
 class TelemetryTests(unittest.TestCase):
+    def test_identity_and_result_conflicts_are_immediate_even_after_generic_409(self):
+        sdk = Mock()
+        with patch.object(telemetry, '_sdk', sdk):
+            telemetry.reserve_event('API_HTTP_409', telemetry.time.time())
+            for reason in ['ACCOUNT_IDENTITY_MISMATCH', 'RESULT_CONFLICT']:
+                for _ in range(2):
+                    telemetry.report({'errorCode': 'API_HTTP_409', 'apiReason': reason, 'operation': 'complete'})
+            self.assertEqual(sdk.capture_event.call_count, 2)
+            event = telemetry.sanitize(sdk.capture_event.call_args.args[0], {})
+            self.assertEqual(event['fingerprint'], ['mt5-worker', 'API_HTTP_409', 'RESULT_CONFLICT'])
+
     def test_explanation_and_api_context_survive_sanitization_without_secrets(self):
         event = telemetry.sanitize({'tags': {'error_code': 'API_HTTP_409', 'slot': 'demo-10',
                                             'operation': 'complete', 'api_reason': 'LEASE_LOST'},

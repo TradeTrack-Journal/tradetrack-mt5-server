@@ -1,6 +1,7 @@
 """Fixed diagnostic vocabulary. Never forward response/native text or identifiers."""
 OPERATIONS = {'config', 'inventory', 'session', 'report', 'claim', 'credentials',
               'heartbeat', 'complete', 'fail', 'prepare', 'preparation-missing'}
+CRITICAL_API_REASONS = {'ACCOUNT_IDENTITY_MISMATCH', 'RESULT_CONFLICT'}
 API_REASONS = {
     'SESSION_CHANGED': 'The terminal generation changed; refresh the session before retrying.',
     'SESSION_CONFLICT': 'The requested session conflicts with the registered process.',
