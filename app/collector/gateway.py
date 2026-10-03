@@ -51,9 +51,14 @@ def fresh_journal_lines(data_path, baseline):
         with path.open("rb") as stream:
             stream.seek(offset)
             fresh = stream.read(1024 * 1024 + 1)
-        if len(fresh) > 1024 * 1024 or len(fresh) % 2:
+        if len(fresh) > 1024 * 1024:
             raise CollectionError("JOURNAL_UNAVAILABLE")
-        yield from fresh.decode("utf-16-le").splitlines()
+        # MT5 may still be appending a UTF-16 character or a log record.
+        # Never classify a partial '(Service is not avail...' as a rejection.
+        if len(fresh) % 2:
+            continue
+        for line in fresh.decode("utf-16-le").split('\n')[:-1]:
+            yield line.rstrip('\r')
 
 
 def investor_evidence(data_path, baseline, login):
@@ -62,11 +67,15 @@ def investor_evidence(data_path, baseline, login):
     return any(line.split("\t")[-1].strip() == expected for line in fresh_journal_lines(data_path, baseline))
 
 
-def login_failure(native, data_path, baseline, login, server, *, settle_seconds=3):
+def login_failure(native, data_path, baseline, login, server, *, settle_seconds=10):
     # Capture immediately: later native calls could overwrite the failure code.
     code = connection_error(native)
-    if code != 'AUTH_FAILED' or baseline is None:
+    if code != 'AUTH_FAILED':
         return code
+    # Native -6 alone is ambiguous: the broker also uses it for temporary
+    # service failures. Missing evidence permits only the API's bounded retries.
+    if baseline is None:
+        return 'CONNECTION_FAILED'
     # MT5 also uses -6 during access-point/server switching. Require exact,
     # fresh transport evidence, or an explicit service-unavailable response.
     # This merely requests a later retry: identity and access gates stay intact.
@@ -85,18 +94,21 @@ def login_failure(native, data_path, baseline, login, server, *, settle_seconds=
                 common_message = f"'{login}': authorization on {server} failed (Common error)"
                 unavailable_message = f"'{login}': authorization on {server} failed (Service is not available)"
                 if (source == 'Network' and
-                        message.startswith(f"'{login}': authorization on {server} failed (") and
+                        message.startswith(f"'{login}': authorization on {server} failed (") and message.endswith(')') and
                         message not in (common_message, unavailable_message)):
                     return code  # Explicit rejection takes precedence over transport evidence.
                 common_error |= source == 'Network' and message == common_message
                 service_unavailable |= source == 'Network' and message == unavailable_message
-        except (OSError, UnicodeError, CollectionError):
-            return code
+        except CollectionError:
+            return 'CONNECTION_FAILED'  # Rotated/oversized evidence is unusable.
+        except (OSError, UnicodeError):
+            # A sharing violation or partial write may settle within this wait.
+            sync_failed = common_error = service_unavailable = False
         if service_unavailable or (sync_failed and common_error):
             return 'NETWORK_UNAVAILABLE'
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            return code
+            return 'CONNECTION_FAILED'
         time.sleep(min(0.1, remaining))
 
 

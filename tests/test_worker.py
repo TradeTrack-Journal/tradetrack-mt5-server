@@ -163,10 +163,10 @@ class GatewayTests(unittest.TestCase):
             collect(self.request, self.native, self.windows)
         self.native.history_deals_get.assert_not_called()
 
-    def test_explicit_auth_failure_is_not_treated_as_network(self):
+    def test_native_auth_code_without_journal_evidence_remains_bounded_and_reads_no_data(self):
         self.native.login.return_value = False
         self.native.last_error.return_value = (-6, 'synthetic secret broker text')
-        with patch('app.collector.gateway.time.monotonic', side_effect=[0, 4]), self.assertRaisesRegex(CollectionError, '^AUTH_FAILED$'):
+        with patch('app.collector.gateway.time.monotonic', side_effect=[0, 11]), self.assertRaisesRegex(CollectionError, '^CONNECTION_FAILED$'):
             collect(self.request, self.native, self.windows)
         self.native.history_deals_get.assert_not_called()
         self.assertNotIn('investorPassword', self.request['credentials'])
