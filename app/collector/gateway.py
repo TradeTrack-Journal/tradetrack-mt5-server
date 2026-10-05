@@ -70,10 +70,12 @@ def investor_evidence(data_path, baseline, login):
 def login_failure(native, data_path, baseline, login, server, *, settle_seconds=10):
     # Capture immediately: later native calls could overwrite the failure code.
     code = connection_error(native)
-    if code != 'AUTH_FAILED':
+    if code not in ('AUTH_FAILED', 'CONNECTION_FAILED'):
         return code
-    # Native -6 alone is ambiguous: the broker also uses it for temporary
-    # service failures. Missing evidence permits only the API's bounded retries.
+    # Both -6 and generic failures are ambiguous. Broker transport evidence must
+    # not be ignored just because the native library returned another code.
+    # IPC failures retain their separate quarantine/restart recovery above.
+    # Missing evidence permits only the API's bounded retries.
     if baseline is None:
         return 'CONNECTION_FAILED'
     # MT5 also uses -6 during access-point/server switching. Require exact,

@@ -7,6 +7,40 @@ from app.collector.gateway import journal_baseline, login_failure
 
 
 class LoginFailureTests(unittest.TestCase):
+    def test_generic_native_failure_uses_fresh_transport_evidence(self):
+        line = "CN\t2\ttime\tNetwork\t'12345': authorization on Example-Real failed (Service is not available)"
+        for native_code in (-1, 1):
+            with self.subTest(native_code=native_code), \
+                    patch('app.collector.gateway.fresh_journal_lines', return_value=[line]):
+                native = Mock(last_error=Mock(return_value=(native_code, 'private')))
+                self.assertEqual(login_failure(native, '.', {}, '12345', 'Example-Real', settle_seconds=0),
+                                 'NETWORK_UNAVAILABLE')
+                native.last_error.assert_called_once()
+                native.login.assert_not_called()
+                native.history_deals_get.assert_not_called()
+
+    def test_generic_failure_does_not_accept_other_account_or_old_evidence(self):
+        line = "CN\t2\ttime\tNetwork\t'99999': authorization on Example-Real failed (Service is not available)"
+        for lines in ([], [line]):
+            with self.subTest(lines=lines), patch('app.collector.gateway.fresh_journal_lines', return_value=lines):
+                native = Mock(last_error=Mock(return_value=(-1, 'private')))
+                self.assertEqual(login_failure(native, '.', {}, '12345', 'Example-Real', settle_seconds=0),
+                                 'CONNECTION_FAILED')
+
+    def test_generic_failure_rejection_still_blocks_transport_reclassification(self):
+        unavailable = "CN\t2\ttime\tNetwork\t'12345': authorization on Example-Real failed (Service is not available)"
+        rejected = unavailable.replace('Service is not available', 'Invalid account')
+        with patch('app.collector.gateway.fresh_journal_lines', return_value=[unavailable, rejected]):
+            native = Mock(last_error=Mock(return_value=(-1, 'private')))
+            self.assertEqual(login_failure(native, '.', {}, '12345', 'Example-Real', settle_seconds=0),
+                             'CONNECTION_FAILED')
+
+    def test_ipc_failure_retains_process_recovery_without_reading_journal(self):
+        native = Mock(last_error=Mock(return_value=(-10005, 'private')))
+        with patch('app.collector.gateway.fresh_journal_lines') as journal:
+            self.assertEqual(login_failure(native, '.', {}, '12345', 'Example-Real'), 'TERMINAL_IPC_UNAVAILABLE')
+            journal.assert_not_called()
+
     def test_partial_service_record_and_utf16_character_are_not_auth_rejections(self):
         native = Mock(last_error=Mock(return_value=(-6, 'private')))
         record = "CN\t2\ttime\tNetwork\t'12345': authorization on Example-Real failed (Service is not available)\r\n".encode('utf-16-le')
