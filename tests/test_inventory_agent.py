@@ -11,6 +11,35 @@ from app.collector.windows_inventory import InventoryError, catalogue_fingerprin
 
 
 class InventoryTests(unittest.TestCase):
+    def setUp(self):
+        from app.collector.windows_inventory import _catalogue_cache
+        _catalogue_cache.clear()
+
+    @patch('app.collector.windows_inventory.validate_data_path')
+    @patch('app.collector.windows_inventory.WindowsTerminal')
+    @patch('app.collector.windows_inventory.catalogue_fingerprint', return_value='a' * 64)
+    @patch('app.collector.windows_inventory.time.monotonic', return_value=1000)
+    def test_reuse_requires_unchanged_process_bytes_and_unextended_expiry(self, clock, fingerprint, windows, _):
+        native = windows.return_value
+        native.find_process.return_value = (12, '12:34')
+        native.process_identity.return_value = '12:34'
+        native.terminal_build.return_value = 6231
+        native.visible_servers.return_value = ['Example-Demo']
+        collect_inventory('terminal64.exe', '.', inspect_ui=True)
+        clock.return_value = 1200
+        self.assertEqual(collect_inventory('terminal64.exe', '.', inspect_ui=True)['serverNames'], ['Example-Demo'])
+        self.assertEqual(native.visible_servers.call_count, 1)
+        clock.return_value = 1300
+        collect_inventory('terminal64.exe', '.', inspect_ui=True)
+        self.assertEqual(native.visible_servers.call_count, 2)
+        fingerprint.return_value = 'b' * 64
+        collect_inventory('terminal64.exe', '.', inspect_ui=True)
+        self.assertEqual(native.visible_servers.call_count, 3)
+        native.find_process.return_value = (12, '12:35')
+        native.process_identity.return_value = '12:35'
+        collect_inventory('terminal64.exe', '.', inspect_ui=True)
+        self.assertEqual(native.visible_servers.call_count, 4)
+
     @patch('app.collector.windows_inventory.validate_data_path')
     @patch('app.collector.windows_inventory.WindowsTerminal')
     @patch('app.collector.windows_inventory.catalogue_fingerprint', return_value='a' * 64)

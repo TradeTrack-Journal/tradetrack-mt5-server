@@ -19,6 +19,8 @@ from .terminal_build import VERIFIED_BUILDS, file_build
 # MT5 modal inventory in two worker threads can stall the Windows message
 # queues. Serialize only this brief UI step; collection remains per-slot.
 _inventory_ui_lock = Lock()
+_catalogue_cache = {}
+CATALOGUE_UI_REFRESH_SECONDS = 300
 
 
 class InventoryError(Exception):
@@ -381,9 +383,16 @@ def collect_inventory(executable, data_path, inspect_ui=False):
                 "catalogHash": None, "serverNames": [], "verificationMethod": "none",
                 "errorCode": "TERMINAL_BUILD_UNSUPPORTED" if build is not None else "TERMINAL_BUILD_UNAVAILABLE"}
     fingerprint = catalogue_fingerprint(data_path)
+    cache_key = str(Path(executable).resolve()).casefold()
+    cached = _catalogue_cache.get(cache_key)
+    reuse = bool(inspect_ui and cached and cached['identity'] == identity
+                 and cached['hash'] == fingerprint and cached['build'] == build
+                 and 0 <= time.monotonic() - cached['verified_at'] < CATALOGUE_UI_REFRESH_SECONDS)
     try:
-        names = windows.visible_servers(pid, executable, identity, managed_login=True) if inspect_ui else []
+        names = (list(cached['names']) if reuse else
+                 windows.visible_servers(pid, executable, identity, managed_login=True) if inspect_ui else [])
     except InventoryError as exc:
+        _catalogue_cache.pop(cache_key, None)
         # Preserve only positively verified process identity, never a stale catalogue.
         # The recovery API needs this identity to fence the exact failed process.
         if windows.process_identity(pid, executable) != identity:
@@ -392,5 +401,13 @@ def collect_inventory(executable, data_path, inspect_ui=False):
                 "catalogHash": None, "serverNames": [], "verificationMethod": "none",
                 "errorCode": str(exc)}
     if catalogue_fingerprint(data_path) != fingerprint or windows.process_identity(pid, executable) != identity:
+        _catalogue_cache.pop(cache_key, None)
         raise InventoryError("TERMINAL_CHANGED")
+    if inspect_ui and not reuse:
+        # Reuse only positive UI evidence for the same process/build/exact bytes.
+        # Cache hits never extend the original expiry. Native access/identity
+        # guards still run on every collection independently of this catalogue.
+        _catalogue_cache[cache_key] = {'identity': identity, 'hash': fingerprint,
+                                     'build': build, 'names': tuple(names),
+                                     'verified_at': time.monotonic()}
     return {"status": "STARTING", "processId": pid, "processIdentity": identity, "catalogHash": fingerprint, "serverNames": names, "verificationMethod": "login_dialog" if inspect_ui else "none", "errorCode": None}
