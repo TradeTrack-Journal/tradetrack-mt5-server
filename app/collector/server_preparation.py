@@ -82,7 +82,11 @@ class ServerPreparation:
             return None
         # A newly discovered name in any idle slot propagates without waiting
         # for another user to request it. Keep all existing names and builds.
-        from .catalogue_sync import synchronize_once
+        from .catalogue_sync import synchronize_once, verified_snapshot
+        # A failed inventory is unknown, not proof that a server is absent.
+        workers = [worker for worker in workers if verified_snapshot(worker)]
+        if not workers:
+            return None
         synchronized = synchronize_once(workers)
         if synchronized:
             return synchronized

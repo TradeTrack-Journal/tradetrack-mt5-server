@@ -23,9 +23,10 @@ def recover_quarantined(config, token, slot):
             try:
                 close_terminal(native, slot['executablePath'])
             except InventoryError as exc:
-                if str(exc) != 'TERMINAL_STOP_TIMEOUT':
+                if str(exc) not in {'TERMINAL_STOP_TIMEOUT', 'TERMINAL_UI_BUSY',
+                                    'UI_CLEANUP_FAILED', 'UI_TIMEOUT', 'UI_DIALOG_UNAVAILABLE'}:
                     raise
-                # Graceful close was accepted but did not finish. Revalidate the
+                # A fenced dedicated terminal may have blocked modal UI. Revalidate the
                 # server fence and pin the exact process handle before forcing it.
                 agent.connect()
                 if agent.remote_slots[slot['id']].get('quarantineIdentity') != identity:

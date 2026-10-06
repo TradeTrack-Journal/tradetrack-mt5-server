@@ -12,6 +12,7 @@ from app.collector.quarantine_recovery import recover_quarantined
 from app.collector.scheduler import error_code
 from app.collector.diagnostics import error_fields
 from app.collector.windows_inventory import InventoryError
+from app.collector.ui_recovery import UiRecoveryBudget, fence_ui_failure
 
 
 def main():
@@ -24,6 +25,7 @@ def main():
     token = os.environ.pop('MT5_AGENT_TOKEN', '')
     telemetry.initialize(Path(args.config).resolve().parent / 'telemetry-state.sqlite3')
     retry_at = {}
+    ui_budget = UiRecoveryBudget(Path(args.config).resolve().parent / 'ui-recovery-budget.json')
 
     def emit(result):
         result['at'] = datetime.now(timezone.utc).isoformat()
@@ -49,6 +51,16 @@ def main():
                 # authoritative config fence under the slot lock itself.
                 emit({'state': 'inventory_unavailable', 'errorCode': error_code(exc), **error_fields(exc)})
             for slot in config['slots']:
+                observed = agent.remote_slots[slot['id']]
+                if ui_budget.observe(dict(observed, id=slot['id']), time.time()):
+                    try:
+                        if ui_budget.reserve(slot['id'], time.time()) and fence_ui_failure(agent, slot, observed):
+                            emit({'slotId': slot['id'], 'state': 'ui_recovery_fenced',
+                                  'cause': observed.get('inventoryErrorCode')})
+                            agent.connect()
+                    except (AgentError, InventoryError, OSError, ValueError, TypeError, KeyError) as exc:
+                        emit({'slotId': slot['id'], 'state': 'ui_recovery_deferred',
+                              'errorCode': error_code(exc), **error_fields(exc)})
                 if not agent.remote_slots[slot['id']].get('quarantineIdentity'):
                     continue
                 if time.monotonic() < retry_at.get(slot['id'], 0):

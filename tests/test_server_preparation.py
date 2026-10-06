@@ -1,6 +1,7 @@
 from pathlib import Path
 from contextlib import nullcontext
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock, patch
@@ -20,6 +21,17 @@ class PreparationTests(unittest.TestCase):
         self.worker = SimpleNamespace(client=MagicMock(), slot={'id':'test-slot'}, inventory=SimpleNamespace(
             last_snapshots={'test-slot':{'serverNames':['Keep-Manual']}}, sessions={'test-slot':{}}))
         self.worker.client.call.return_value = {'preparationRequests':[{'company':'Example Ltd','serverName':'Example-Demo'}]}
+        self.worker.inspected_at = time.monotonic()
+        self.worker.catalog_hash = 'old-hash'
+        self.worker.inventory.sessions['test-slot'] = {'generation': 'test-generation', 'processIdentity': 'identity'}
+        self.worker.inventory.last_snapshots['test-slot'].update(
+            status='STARTING', verificationMethod='login_dialog', processIdentity='identity', catalogHash='old-hash')
+
+    def test_failed_inventory_is_not_a_missing_server(self):
+        self.worker.inventory.last_snapshots['test-slot'].update(status='ERROR', serverNames=[], processIdentity=None)
+        self.assertIsNone(self.preparation.once([self.worker]))
+        self.worker.client.call.assert_not_called()
+        self.preparation.native.search.assert_not_called()
 
     def test_rejects_collection_slot_as_builder(self):
         with self.assertRaisesRegex(InventoryError, 'DEDICATED_BUILDER_REQUIRED'):
@@ -66,7 +78,7 @@ class PreparationTests(unittest.TestCase):
             self.worker.slot.update(executablePath=str(slot / 'terminal64.exe'), dataPath=str(slot))
             self.worker.inventory.sessions['test-slot'] = {'generation':'test-generation','processIdentity':'identity'}
             self.worker.catalog_hash = 'old-hash'
-            self.worker.inspected_at = 1
+            self.worker.inspected_at = time.monotonic()
             self.preparation.native.search.return_value = {'state':'PRESENT','serverNames':['Keep-Manual','Example-Demo']}
             self.preparation.native.inventory_lock.side_effect = lambda _: nullcontext()
             stopped = set()

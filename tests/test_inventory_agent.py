@@ -11,6 +11,24 @@ from app.collector.windows_inventory import InventoryError, catalogue_fingerprin
 
 
 class InventoryTests(unittest.TestCase):
+    @patch('app.collector.windows_inventory.validate_data_path')
+    @patch('app.collector.windows_inventory.WindowsTerminal')
+    @patch('app.collector.windows_inventory.catalogue_fingerprint', return_value='a' * 64)
+    def test_ui_error_retains_only_current_process_identity(self, _, windows, __):
+        native = windows.return_value
+        native.find_process.return_value = (12, '12:34')
+        native.terminal_build.return_value = 6231
+        native.process_identity.return_value = '12:34'
+        native.visible_servers.side_effect = InventoryError('TERMINAL_UI_BUSY')
+        result = collect_inventory('terminal64.exe', '.', inspect_ui=True)
+        self.assertEqual(result['processIdentity'], '12:34')
+        self.assertEqual(result['status'], 'ERROR')
+        self.assertEqual(result['serverNames'], [])
+        self.assertIsNone(result['catalogHash'])
+        native.process_identity.return_value = '12:35'
+        with self.assertRaisesRegex(InventoryError, 'TERMINAL_CHANGED'):
+            collect_inventory('terminal64.exe', '.', inspect_ui=True)
+
     def test_missing_catalogue_is_not_an_empty_inventory(self):
         with tempfile.TemporaryDirectory() as path:
             with self.assertRaisesRegex(InventoryError, "CATALOGUE_UNAVAILABLE"):

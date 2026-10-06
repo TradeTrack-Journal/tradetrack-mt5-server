@@ -55,3 +55,20 @@ class QuarantineRecoveryTests(unittest.TestCase):
                 result = recover_quarantined({}, 'token', {'id': 'demo-01', 'executablePath': 'terminal.exe'})
                 self.assertEqual(terminate.call_count, 0 if changed else 1)
                 self.assertEqual(result, 'fence_changed' if changed else 'restarted')
+
+    def test_fenced_modal_failure_can_recover_but_unknown_error_cannot(self):
+        for code in ('TERMINAL_UI_BUSY', 'UNSUPPORTED_TERMINAL_UI'):
+            with patch('app.collector.quarantine_recovery.InventoryAgent') as agent, \
+                 patch('app.collector.quarantine_recovery.WindowsTerminal') as native, \
+                 patch('app.collector.quarantine_recovery.close_terminal', side_effect=InventoryError(code)), \
+                 patch('app.collector.quarantine_recovery.start_terminal', return_value=True), \
+                 patch('app.collector.quarantine_recovery.terminate_verified') as terminate:
+                agent.return_value.remote_slots = {'one': {'quarantineIdentity': '42:1'}}
+                native.return_value.find_process.return_value = (42, '42:1')
+                if code == 'TERMINAL_UI_BUSY':
+                    self.assertEqual(recover_quarantined({}, 'token', {'id': 'one', 'executablePath': 'terminal.exe'}), 'restarted')
+                    terminate.assert_called_once()
+                else:
+                    with self.assertRaisesRegex(InventoryError, code):
+                        recover_quarantined({}, 'token', {'id': 'one', 'executablePath': 'terminal.exe'})
+                    terminate.assert_not_called()

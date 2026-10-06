@@ -100,7 +100,7 @@ def run_slots(workers, emit, preparation=None, once=False, stop=lambda: False,
                     failure = state.worker.prepare_inventory()
                     if failure:
                         emit(failure)
-                        state.due = clock() + interval
+                        state.due = clock() + max(interval, min(120, failure.get('retryAfterSeconds', 0)))
                         state.finished = once
                         failed = True
                         continue

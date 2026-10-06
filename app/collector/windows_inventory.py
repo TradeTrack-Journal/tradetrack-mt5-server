@@ -381,7 +381,16 @@ def collect_inventory(executable, data_path, inspect_ui=False):
                 "catalogHash": None, "serverNames": [], "verificationMethod": "none",
                 "errorCode": "TERMINAL_BUILD_UNSUPPORTED" if build is not None else "TERMINAL_BUILD_UNAVAILABLE"}
     fingerprint = catalogue_fingerprint(data_path)
-    names = windows.visible_servers(pid, executable, identity, managed_login=True) if inspect_ui else []
+    try:
+        names = windows.visible_servers(pid, executable, identity, managed_login=True) if inspect_ui else []
+    except InventoryError as exc:
+        # Preserve only positively verified process identity, never a stale catalogue.
+        # The recovery API needs this identity to fence the exact failed process.
+        if windows.process_identity(pid, executable) != identity:
+            raise InventoryError('TERMINAL_CHANGED') from None
+        return {"status": "ERROR", "processId": pid, "processIdentity": identity,
+                "catalogHash": None, "serverNames": [], "verificationMethod": "none",
+                "errorCode": str(exc)}
     if catalogue_fingerprint(data_path) != fingerprint or windows.process_identity(pid, executable) != identity:
         raise InventoryError("TERMINAL_CHANGED")
     return {"status": "STARTING", "processId": pid, "processIdentity": identity, "catalogHash": fingerprint, "serverNames": names, "verificationMethod": "login_dialog" if inspect_ui else "none", "errorCode": None}

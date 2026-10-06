@@ -134,7 +134,10 @@ class SlotWorker:
                 self.inspected_at = 0
                 return {'slotId': slot['id'], 'state': 'restarting', 'errorCode': None}
             if report["status"] != "STARTING":
-                return {"slotId": slot["id"], "state": "offline", "errorCode": report["errorCode"]}
+                self.inspected_at = 0
+                from .ui_recovery import UI_ERRORS
+                return {"slotId": slot["id"], "state": "offline", "errorCode": report["errorCode"],
+                        "retryAfterSeconds": 30 if report["errorCode"] in UI_ERRORS else 0}
             self.catalog_hash = self.inventory.last_snapshots[slot["id"]]["catalogHash"]
             self.inspected_at = time.monotonic()
         return None
