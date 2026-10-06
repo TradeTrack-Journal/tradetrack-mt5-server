@@ -342,7 +342,10 @@ class WindowsTerminal:
                 if not 0 <= count <= 1000:
                     raise InventoryError("SERVER_LIST_LIMIT")
                 names = []
-                read_deadline = time.monotonic() + 8
+                # Hundreds of cross-process combo-box reads can exceed eight
+                # seconds under CPU contention even when every reply is valid.
+                # Keep a hard bound and all identity/count checks.
+                read_deadline = time.monotonic() + 20
                 for index in range(count):
                     if time.monotonic() > read_deadline:
                         raise InventoryError("UI_TIMEOUT")

@@ -54,6 +54,26 @@ class InventoryControlReadinessTests(unittest.TestCase):
         windows.send.assert_not_called()
         windows.u.PostMessageW.assert_any_call(2, 0x111, 2, 0)
 
+    def test_large_catalogue_with_slow_valid_replies_is_not_false_timeout(self):
+        import ctypes
+        windows = self.terminal()
+        windows.u.GetDlgItem.side_effect = [3, 4]
+        clock = [0.0]
+        def send(handle, message, index=0, buffer=0):
+            clock[0] += 0.012
+            if message == 0x146:
+                return 459
+            name = f'Broker-Server{index}'
+            if message == 0x148:
+                source = ctypes.create_unicode_buffer(name)
+                ctypes.memmove(buffer, source, ctypes.sizeof(source))
+            return len(name)
+        windows.send.side_effect = send
+        with patch('app.collector.windows_inventory.time.monotonic', side_effect=lambda: clock[0]):
+            self.assertEqual(len(windows.visible_servers(12, 'terminal64.exe', '12:34')), 459)
+        self.assertGreater(clock[0], 8)
+        self.assertLess(clock[0], 20)
+
     def test_slow_cancel_is_awaited_without_submitting_login(self):
         windows = self.terminal()
         windows.u.GetDlgItem.side_effect = [3, 4]
