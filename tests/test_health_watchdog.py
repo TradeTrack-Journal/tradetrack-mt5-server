@@ -9,6 +9,15 @@ from scripts import watch_mt5_health
 
 
 class WatchdogTests(unittest.TestCase):
+    def test_orphaned_python_process_prevents_duplicate_watchdog(self):
+        with patch('sys.argv', ['watch', '--config', 'config.json']), \
+                patch.object(watch_mt5_health, 'WindowsTerminal') as native, \
+                patch.object(watch_mt5_health, 'main') as main:
+            native.return_value.inventory_lock.return_value.__enter__.side_effect = RuntimeError('SLOT_BUSY')
+            with self.assertRaisesRegex(RuntimeError, 'SLOT_BUSY'):
+                watch_mt5_health.run_single_instance()
+            main.assert_not_called()
+
     def test_diagnostic_inventory_failure_does_not_block_fenced_recovery(self):
         with TemporaryDirectory() as directory:
             log = Path(directory) / 'health.jsonl'

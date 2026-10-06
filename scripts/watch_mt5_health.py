@@ -11,7 +11,7 @@ from app.collector.node_agent import AgentError, InventoryAgent, load_config
 from app.collector.quarantine_recovery import recover_quarantined
 from app.collector.scheduler import error_code
 from app.collector.diagnostics import error_fields
-from app.collector.windows_inventory import InventoryError
+from app.collector.windows_inventory import InventoryError, WindowsTerminal
 from app.collector.ui_recovery import UiRecoveryBudget, fence_ui_failure
 
 
@@ -80,5 +80,18 @@ def main():
     telemetry.flush()
 
 
+def run_single_instance():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--config')
+    options, _ = parser.parse_known_args()
+    if not options.config:
+        return main()  # Let the full parser handle --help or invalid arguments.
+    # Scheduled Task termination can leave Python alive after its PowerShell
+    # parent exits. Keep a second mutex owned by the process doing recovery.
+    lock_key = str(Path(options.config).resolve()) + '.watchdog'
+    with WindowsTerminal().inventory_lock(lock_key):
+        main()
+
+
 if __name__ == '__main__':
-    main()
+    run_single_instance()
