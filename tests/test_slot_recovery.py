@@ -9,6 +9,7 @@ class RecoveryTests(TestCase):
         worker = object.__new__(SlotWorker)
         worker.slot = {'id': 'demo-02', 'executablePath': 'terminal.exe'}
         worker.restart_identity = 'old'
+        worker.inventory = MagicMock()
         worker.windows = MagicMock()
         worker.windows.inventory_lock.return_value = nullcontext()
         worker.windows.find_process.return_value = (12, identity)
@@ -20,7 +21,7 @@ class RecoveryTests(TestCase):
             self.assertEqual(worker.prepare_inventory()['state'], 'restarting')
             close.assert_called_once_with(worker.windows, 'terminal.exe')
             start.assert_called_once_with('terminal.exe')
-        self.assertIsNone(worker.restart_identity)
+        self.assertEqual(worker.restart_identity, 'old')
         self.assertEqual(worker.inspected_at, 0)
 
     def test_new_process_is_not_stopped(self):
@@ -29,6 +30,17 @@ class RecoveryTests(TestCase):
             worker.prepare_inventory()
             close.assert_not_called()
             start.assert_not_called()
+        worker.inventory.report_slot.assert_called_once_with(worker.slot, inspect_ui=False)
+        self.assertIsNone(worker.restart_identity)
+
+    def test_replacement_is_reported_before_stale_config_can_restore_quarantine(self):
+        worker = self.worker('new')
+        worker.config_refreshed_at = 0
+        worker.inventory.remote_slots = {'demo-02': {'quarantineIdentity': 'old'}}
+        worker.prepare_inventory()
+        worker.inventory.connect.assert_not_called()
+        worker.inventory.report_slot.assert_called_once_with(worker.slot, inspect_ui=False)
+        self.assertIsNone(worker.restart_identity)
 
     def test_updater_wait_preserves_quarantine_recovery_intent(self):
         worker = self.worker(None)
