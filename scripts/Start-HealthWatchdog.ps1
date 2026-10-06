@@ -11,8 +11,15 @@ try {
     if (-not $PythonPath) { $PythonPath = Join-Path $repo '.venv\Scripts\python.exe' }
     Push-Location $repo
     try {
-        & $PythonPath -m scripts.watch_mt5_health --config (Join-Path $ConfigDirectory 'agent.json') --log (Join-Path $ConfigDirectory 'health-watchdog.jsonl')
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        while ($true) {
+            $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+            $childArguments = '-m scripts.watch_mt5_health --config "' + (Join-Path $ConfigDirectory 'agent.json') + '" --log "' + (Join-Path $ConfigDirectory 'health-watchdog.jsonl') + '"'
+            $child = Start-Process -FilePath $PythonPath -ArgumentList $childArguments -WorkingDirectory $repo -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $ConfigDirectory "$stamp.watchdog.stderr.log") -RedirectStandardOutput (Join-Path $ConfigDirectory "$stamp.watchdog.stdout.log")
+            try { $child.WaitForExit() } finally { $child.Dispose() }
+            # Preserve diagnostics and recover even when a transport/runtime error
+            # escapes the normal bounded API retry. The Python mutex prevents overlap.
+            Start-Sleep -Seconds 30
+        }
     } finally { Pop-Location }
 } finally {
     Remove-Item Env:MT5_AGENT_TOKEN -ErrorAction SilentlyContinue

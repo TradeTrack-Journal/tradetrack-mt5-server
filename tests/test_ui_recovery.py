@@ -22,6 +22,8 @@ class UiRecoveryTests(TestCase):
         self.assertFalse(budget.observe(self.snapshot(1000), 1300))
         self.assertFalse(budget.observe(self.snapshot(1300, status='STARTING'), 1300))
         self.assertFalse(budget.observe(self.snapshot(1400, inventoryErrorCode='AUTH_FAILED'), 1400))
+        self.assertFalse(budget.observe(self.snapshot(1400, lastHeartbeat=None), 1400))
+        self.assertFalse(budget.observe(self.snapshot(1400, lastHeartbeat='not-a-date'), 1400))
 
     def test_durable_per_slot_and_pool_limits(self):
         with TemporaryDirectory() as directory:

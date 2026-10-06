@@ -23,7 +23,7 @@ class UiRecoveryBudget:
             valid = (slot.get('status') == 'ERROR' and slot.get('inventoryErrorCode') in UI_ERRORS
                      and bool(slot.get('processIdentity')) and bool(slot.get('generation'))
                      and not slot.get('quarantineIdentity') and 0 <= now - heartbeat <= 120)
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError, AttributeError):
             valid = False
         if not valid:
             self.observations.pop(key, None)
