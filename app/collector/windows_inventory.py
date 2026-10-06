@@ -38,7 +38,10 @@ def read_only_caption_matches(caption, login, server, build):
     if type(build) is not int or build not in VERIFIED_BUILDS:
         return False
     prefix = f"{login} - {server}: "
-    mode = r"(Hedge|Netting)" if build == 6182 else "Hedge"
+    # Build 6231 also exposes Netting after restart (observed on the managed
+    # FundingPips, GoatFunded and Exness terminals). Keep the exact Read Only,
+    # account, server and supported-build checks for both accounting modes.
+    mode = r"(Hedge|Netting)" if build in (6182, 6231) else "Hedge"
     return caption.startswith(prefix) and re.fullmatch(
         rf"(?:Demo Account - )?Read Only - {mode} - .+", caption[len(prefix):]
     ) is not None
@@ -295,7 +298,7 @@ class WindowsTerminal:
             self.defer_live_update(pid, executable, identity, mains[0], leaves[0], managed_login=managed_login)
         raise InventoryError("TERMINAL_UI_BUSY")
 
-    def visible_servers(self, pid, executable, identity, managed_login=False, dialog_timeout=3):
+    def visible_servers(self, pid, executable, identity, managed_login=False, dialog_timeout=10):
         """Open only our own login dialog, read only its Server combo, cancel it."""
         with _inventory_ui_lock, self.inventory_lock(executable):
             before, main = self.prepare_login_window(pid, executable, identity, managed_login)

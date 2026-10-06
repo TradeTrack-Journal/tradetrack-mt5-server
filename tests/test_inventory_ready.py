@@ -33,6 +33,18 @@ class InventoryControlReadinessTests(unittest.TestCase):
         self.assertEqual(windows.u.GetDlgItem.call_count, 4)
         windows.u.PostMessageW.assert_any_call(2, 0x111, 2, 0)
 
+    def test_dialog_delayed_by_cpu_contention_is_still_read_and_cancelled(self):
+        windows = self.terminal()
+        clock = [0.0]
+        windows.windows.side_effect = lambda pid: [1, 2] if clock[0] >= 4 else [1]
+        windows.u.GetDlgItem.side_effect = [3, 4]
+        with patch('app.collector.windows_inventory.time.monotonic', side_effect=lambda: clock[0]), \
+                patch('app.collector.windows_inventory.time.sleep', side_effect=lambda delay: clock.__setitem__(0, clock[0] + delay)):
+            self.assertEqual(windows.visible_servers(12, 'terminal64.exe', '12:34'), [])
+        self.assertGreaterEqual(clock[0], 4)
+        self.assertLess(clock[0], 10)
+        windows.u.PostMessageW.assert_any_call(2, 0x111, 2, 0)
+
     def test_unsupported_controls_still_fail_and_cancel(self):
         windows = self.terminal()
         windows.u.GetDlgItem.return_value = 0

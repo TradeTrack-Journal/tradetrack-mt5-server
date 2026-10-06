@@ -8,11 +8,15 @@ class ReadOnlyCaptionTests(unittest.TestCase):
             ('314797943', 'BrightFunded-Server', 'Read Only - Hedge - BrightFunded Ltd.'),
             ('112447298', 'MetaQuotes-Demo', 'Demo Account - Read Only - Hedge - MetaQuotes Ltd.'),
             ('81749697', 'Exness-MT5Trial10', 'Demo Account - Read Only - Hedge - Exness Technologies Ltd'),
+            ('20451593', 'FundingPips-SIM1', 'Demo Account - Read Only - Netting - FundingPips Corp'),
+            ('451568887', 'GoatFunded-Server2', 'Read Only - Netting - Goat Funded Ltd.'),
+            ('252747356', 'Exness-MT5Real33', 'Read Only - Netting - Exness Technologies Ltd'),
         ):
             title = f'{login} - {server}: {suffix}'
             self.assertTrue(read_only_caption_matches(title, login, server, 6231))
             self.assertFalse(read_only_caption_matches(title.replace('Read Only - ', ''), login, server, 6231))
             self.assertFalse(read_only_caption_matches(title, '999', server, 6231))
+            self.assertFalse(read_only_caption_matches(title, login, 'Other-Server', 6231))
             self.assertFalse(read_only_caption_matches(title, login, server, 6232))
 
     def test_observed_headway_6204_caption(self):
