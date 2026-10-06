@@ -46,7 +46,9 @@ def start_terminal(executable):
     startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     startup.wShowWindow = 0
     child_env = {key: value for key, value in os.environ.items() if key.upper() != 'MT5_AGENT_TOKEN'}
-    subprocess.Popen([str(executable), '/portable'], cwd=str(Path(executable).parent), startupinfo=startup, env=child_env)
+    subprocess.Popen([str(executable), '/portable'], cwd=str(Path(executable).parent), startupinfo=startup,
+                     env=child_env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, close_fds=True)
     return True
 
 

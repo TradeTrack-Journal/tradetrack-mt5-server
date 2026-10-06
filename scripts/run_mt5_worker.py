@@ -71,7 +71,11 @@ def main():
     workers = [SlotWorker(config, token, slot) for slot in config['slots']]
     preparation = ServerPreparation(args.builder) if args.builder else None
     drained = lambda: bool(args.drain_file and Path(args.drain_file).exists())
-    ok = run_slots(workers, emit, preparation, once=args.once, stop=drained)
+    # Protect against an orphaned child if Task Scheduler terminates only its
+    # supervisor. The collector itself owns this mutex until it exits.
+    from app.collector.windows_inventory import WindowsTerminal
+    with WindowsTerminal().inventory_lock(str(Path(args.config).resolve()) + '.worker'):
+        ok = run_slots(workers, emit, preparation, once=args.once, stop=drained)
     if args.once and not ok:
         raise SystemExit(1)
 
