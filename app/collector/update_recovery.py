@@ -11,7 +11,24 @@ import time
 from .windows_inventory import InventoryError
 
 _observations = {}
+_blocked = {}
 STALL_SECONDS = 600
+
+
+def observe_blocked_update(executable, updater, reason):
+    """Surface a persistent update prompt/unknown process without clicking it.
+
+    The worker/watchdog telemetry already deduplicates this code durably across
+    slots. No window text, command line or account details leave this boundary.
+    """
+    key = str(Path(executable).resolve())
+    signature = fingerprint(Path(updater).parent, executable)
+    now = time.monotonic()
+    previous = _blocked.get(key)
+    if previous is None or previous[0] != signature:
+        _blocked[key] = (signature, now)
+    elif now - previous[1] >= STALL_SECONDS:
+        raise InventoryError(reason)
 
 
 def fingerprint(directory, executable):
@@ -50,10 +67,12 @@ def recover_stalled_update(native, executable, updater, pid, identity):
     if directory.name != 'liveupdate':
         raise InventoryError('UPDATE_PATH_UNSAFE')
     key = str(directory)
-    if native.find_process(str(executable))[0] is not None or any(
-        native.u.IsWindowVisible(h) for h in native.windows(pid)
-    ):
+    if native.find_process(str(executable))[0] is not None:
         _observations.pop(key, None)
+        return False
+    if any(native.u.IsWindowVisible(h) for h in native.windows(pid)):
+        _observations.pop(key, None)
+        observe_blocked_update(executable, updater, 'UPDATE_REQUIRES_ATTENTION')
         return False
     signature = (identity, fingerprint(directory, executable))
     now = time.monotonic()

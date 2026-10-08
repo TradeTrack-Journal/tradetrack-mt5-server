@@ -41,7 +41,9 @@ def read_only_caption_matches(caption, login, server, build):
     # Build 6231 also exposes Netting after restart (observed on the managed
     # FundingPips, GoatFunded and Exness terminals). Keep the exact Read Only,
     # account, server and supported-build checks for both accounting modes.
-    mode = r"(Hedge|Netting)" if build in (6182, 6231) else "Hedge"
+    # 6246: signed MetaQuotes binary, 459-entry catalogue and FundingPips
+    # read-only Netting caption verified on the managed canary, 2026-10-08.
+    mode = r"(Hedge|Netting)" if build in (6182, 6231, 6246) else "Hedge"
     return caption.startswith(prefix) and re.fullmatch(
         rf"(?:Demo Account - )?Read Only - {mode} - .+", caption[len(prefix):]
     ) is not None

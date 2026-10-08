@@ -3,6 +3,14 @@ from app.collector.windows_inventory import read_only_caption_matches
 
 
 class ReadOnlyCaptionTests(unittest.TestCase):
+    def test_observed_6246_canary_and_access_guard(self):
+        title = '20451593 - FundingPips-SIM1: Demo Account - Read Only - Netting - FundingPips Corp'
+        self.assertTrue(read_only_caption_matches(title, '20451593', 'FundingPips-SIM1', 6246))
+        for invalid in (title.replace('Read Only - ', ''), title.replace('20451593', '999'),
+                        title.replace('FundingPips-SIM1', 'Other-Server')):
+            self.assertFalse(read_only_caption_matches(invalid, '20451593', 'FundingPips-SIM1', 6246))
+        self.assertFalse(read_only_caption_matches(title, '20451593', 'FundingPips-SIM1', 6247))
+
     def test_observed_6231_broker_and_demo_captions(self):
         for login, server, suffix in (
             ('314797943', 'BrightFunded-Server', 'Read Only - Hedge - BrightFunded Ltd.'),

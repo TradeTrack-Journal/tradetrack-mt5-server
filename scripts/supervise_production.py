@@ -43,18 +43,20 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config-directory', required=True)
     parser.add_argument('--check-only', action='store_true')
+    parser.add_argument('--watchdog', action='store_true')
     args = parser.parse_args()
     directory = Path(args.config_directory).resolve()
     repo = Path(__file__).resolve().parent.parent
     native = WindowsTerminal()
+    role = 'health-watchdog' if args.watchdog else 'production'
 
     def emit(state, **fields):
-        with (directory / 'production-supervisor.jsonl').open('a', encoding='utf-8') as stream:
+        with (directory / f'{role}-supervisor.jsonl').open('a', encoding='utf-8') as stream:
             stream.write(json.dumps(dict(state=state, at=datetime.now(timezone.utc).isoformat(), **fields)) + '\n')
 
     # A Python-owned mutex survives neither exit nor crash; an orphaned parent
     # shell cannot block the next launch. The task must use the same Windows user.
-    with native.inventory_lock(str(directory / 'production-supervisor')):
+    with native.inventory_lock(str(directory / f'{role}-supervisor')):
         while True:
             if (directory / 'worker.drain').exists():
                 if args.check_only:
@@ -71,7 +73,7 @@ def main():
                 if args.check_only:
                     emit('preflight_ok')
                     return
-                for slot in config['slots']:
+                for slot in ([] if args.watchdog else config['slots']):
                     if (Path(slot['dataPath']) / '.server-preparing').exists():
                         raise RuntimeError('UNFINISHED_PREPARATION')
                     if not native.find_process(slot['executablePath'])[0]:
@@ -86,10 +88,16 @@ def main():
                 token = None
                 python = Path(sys.executable).with_name('python.exe')
                 stamp = datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')
+                if args.watchdog:
+                    stamp += '.watchdog'
+                command = ([str(python), '-m', 'scripts.watch_mt5_health',
+                            '--config', str(directory / 'agent.json'),
+                            '--log', str(directory / 'health-watchdog.jsonl')] if args.watchdog else
+                           [str(python), '-m', 'scripts.run_mt5_worker',
+                            '--config', str(directory / 'agent.json'), '--drain-file', str(directory / 'worker.drain'),
+                            '--builder', str(directory.parent / 'server-builder' / 'terminal64.exe')])
                 with (directory / f'{stamp}.stdout.log').open('ab') as out, (directory / f'{stamp}.stderr.log').open('ab') as err:
-                    child = subprocess.Popen([str(python), '-m', 'scripts.run_mt5_worker',
-                        '--config', str(directory / 'agent.json'), '--drain-file', str(directory / 'worker.drain'),
-                        '--builder', str(directory.parent / 'server-builder' / 'terminal64.exe')],
+                    child = subprocess.Popen(command,
                         cwd=repo, env=child_env, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
                         creationflags=subprocess.CREATE_NO_WINDOW | subprocess.ABOVE_NORMAL_PRIORITY_CLASS)
                     child_env.pop('MT5_AGENT_TOKEN', None)

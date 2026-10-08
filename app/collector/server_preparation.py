@@ -1,5 +1,6 @@
 """Between-job server preparation; slot replacement is fenced and offline only."""
 from hashlib import sha256
+import json
 import os
 from pathlib import Path
 import shutil
@@ -15,6 +16,8 @@ def update_running(executable):
     native = WindowsTerminal()
     for origin in root.glob('*/origin.txt'):
         try:
+            if origin.parent.is_symlink() or origin.parent.is_junction():
+                raise InventoryError('UPDATE_PATH_UNSAFE')
             raw = origin.read_bytes()
             text = raw.decode('utf-16') if raw.startswith((b'\xff\xfe', b'\xfe\xff')) else raw.decode('utf-8-sig')
             if Path(text.strip()).resolve() != Path(executable).resolve().parent:
@@ -30,6 +33,13 @@ def update_running(executable):
                 except OSError:
                     return True  # Unreadable/changing update files do not permit a second launch.
                 return True
+            if updater.exists():
+                # Process enumeration can miss an elevated updater, and a newly
+                # handed-off updater may not yet be visible. Its executable is
+                # evidence of an unfinished update, never permission to relaunch.
+                from .update_recovery import observe_blocked_update
+                observe_blocked_update(executable, updater, 'UPDATE_PROCESS_UNVERIFIED')
+                return True
         except (OSError, UnicodeError):
             continue
         except InventoryError as error:
@@ -40,8 +50,31 @@ def update_running(executable):
 
 
 def start_terminal(executable):
-    if update_running(executable):
-        return False
+    native = WindowsTerminal()
+    with native.inventory_lock(str(executable)):
+        if native.find_process(str(executable))[0] is not None:
+            return True
+        if update_running(executable):
+            return False
+        return _launch_terminal(executable)
+
+
+def _launch_terminal(executable):
+    marker = Path(executable).parent / '.terminal-launch.json'
+    now = time.time()
+    try:
+        if marker.exists():
+            previous = json.loads(marker.read_text(encoding='utf-8'))['at']
+            if now - previous < 60:
+                return False
+        temporary = marker.with_suffix('.tmp')
+        with temporary.open('w', encoding='utf-8') as stream:
+            json.dump({'at': now}, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, marker)
+    except (OSError, ValueError, KeyError, TypeError):
+        raise InventoryError('RECOVERY_BUDGET_UNAVAILABLE') from None
     startup = subprocess.STARTUPINFO()
     startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     startup.wShowWindow = 0
@@ -56,6 +89,8 @@ def close_terminal(native, executable):
     pid, identity = native.find_process(str(executable))
     if not pid:
         return
+    from .restart_budget import reserve_restart
+    reserve_restart(executable, identity)
     mains = [h for h in native.windows(pid) if native.class_name(h) == 'MetaQuotes::MetaTrader::5.00']
     dialogs = [h for h in native.windows(pid) if native.class_name(h) == '#32770' and native.u.IsWindowVisible(h)]
     if len(mains) == 1 and len(dialogs) == 1:

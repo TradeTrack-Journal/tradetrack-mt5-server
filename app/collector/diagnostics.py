@@ -26,6 +26,10 @@ API_REASONS = {
     'INVENTORY_LIMIT': 'The inventory exceeds the supported slot or server-state limit.',
 }
 EXPLANATIONS = {
+    'TERMINAL_BUILD_UNSUPPORTED': 'MT5 updated to an unverified build. Only this slot is blocked until compatibility is reviewed.',
+    'UPDATE_REQUIRES_ATTENTION': 'MT5 updater has shown a persistent dialog for at least ten minutes. Automatic terminal relaunch is blocked.',
+    'UPDATE_PROCESS_UNVERIFIED': 'An unfinished MT5 updater remains but its process cannot be verified. Relaunch is blocked to avoid an update loop.',
+    'RECOVERY_BUDGET_UNAVAILABLE': 'The shared restart budget cannot be read safely. Recovery is deferred; existing terminals keep running.',
     'API_HTTP_409': 'TradeTrack API rejected a conflicting state. This alone does not indicate an MT5 password failure.',
     'API_HTTP_401': 'TradeTrack API rejected worker authentication; check the node token, not the MT5 password.',
     'API_HTTP_403': 'TradeTrack API denied this worker operation; check node permissions and configuration.',

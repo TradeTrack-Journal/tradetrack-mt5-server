@@ -84,8 +84,18 @@ class RecoveryTests(TestCase):
 
     def test_active_updater_prevents_another_terminal_launch(self):
         from app.collector.server_preparation import start_terminal
-        with patch('app.collector.server_preparation.update_running', return_value=True), patch('app.collector.server_preparation.subprocess.Popen') as launch:
-            start_terminal('terminal.exe')
+        with patch('app.collector.server_preparation.WindowsTerminal') as native, patch('app.collector.server_preparation.update_running', return_value=True), patch('app.collector.server_preparation.subprocess.Popen') as launch:
+            native.return_value.find_process.return_value = (None, None)
+            self.assertFalse(start_terminal('terminal.exe'))
+            launch.assert_not_called()
+
+    def test_start_rechecks_existing_process_under_lock(self):
+        from app.collector.server_preparation import start_terminal
+        with patch('app.collector.server_preparation.WindowsTerminal') as native, patch('app.collector.server_preparation.update_running') as update, patch('app.collector.server_preparation._launch_terminal') as launch:
+            native.return_value.find_process.return_value = (42, '42:1')
+            self.assertTrue(start_terminal('terminal.exe'))
+            native.return_value.inventory_lock.return_value.__enter__.assert_called_once()
+            update.assert_not_called()
             launch.assert_not_called()
 
     def test_quarantine_arriving_after_connect_is_recovered(self):

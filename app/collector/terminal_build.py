@@ -2,7 +2,7 @@
 import ctypes as c
 from ctypes import wintypes as w
 
-VERIFIED_BUILDS = (6182, 6190, 6193, 6204, 6230, 6231)
+VERIFIED_BUILDS = (6182, 6190, 6193, 6204, 6230, 6231, 6246)
 
 
 def file_build(executable):

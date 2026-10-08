@@ -35,6 +35,11 @@ def main():
         telemetry.report(result)
 
     while True:
+        if (Path(args.config).resolve().parent / 'worker.drain').exists():
+            if args.once:
+                break
+            time.sleep(5)
+            continue
         try:
             # A pool expansion must not leave the watchdog comparing against
             # its old slot list forever. Validate the complete file on each pass.
