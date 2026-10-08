@@ -141,11 +141,17 @@ class InventoryAgent:
         self.sessions = {}
         self.remote_slots = {}
         self.last_snapshots = {}
+        self.accepted_builds = None
 
     def connect(self):
         remote = self.client.call("/config")
         if remote.get("nodeId") != self.config["nodeId"] or not isinstance(remote.get("slots"), list):
             raise AgentError("API_CONFIG_INVALID")
+        builds = remote.get('terminalBuilds')
+        if builds is not None and (not isinstance(builds, list) or not 0 < len(builds) <= 64
+                                   or any(type(build) is not int or build <= 0 for build in builds)):
+            raise AgentError('API_CONFIG_INVALID')
+        self.accepted_builds = set(builds) if builds is not None else None
         self.remote_slots = {slot["id"]: slot for slot in remote["slots"] if isinstance(slot, dict) and isinstance(slot.get("id"), str)}
         if set(self.remote_slots) != {slot["id"] for slot in self.config["slots"]}:
             raise AgentError("SLOT_CONFIG_MISMATCH")
@@ -157,6 +163,11 @@ class InventoryAgent:
 
     def report_slot(self, slot, inspect_ui=False):
         snapshot = inventory_snapshot(slot, inspect_ui)
+        if snapshot['status'] == 'STARTING' and self.accepted_builds is not None:
+            from .terminal_build import file_build
+            if file_build(slot['executablePath']) not in self.accepted_builds:
+                snapshot = dict(snapshot, status='ERROR', errorCode='API_TERMINAL_BUILD_UNSUPPORTED',
+                                serverNames=[], verificationMethod='none', catalogHash=None)
         current = self.sessions.get(slot["id"])
         if current is None or current["processIdentity"] != snapshot["processIdentity"]:
             generation = str(uuid4())

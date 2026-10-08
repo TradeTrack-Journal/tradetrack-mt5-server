@@ -126,6 +126,34 @@ class InventoryTests(unittest.TestCase):
 
 
 class AgentTests(unittest.TestCase):
+    @patch('app.collector.terminal_build.file_build', return_value=6246)
+    @patch('app.collector.node_agent.inventory_snapshot')
+    def test_api_build_mismatch_reports_unready_before_claim(self, snapshot, build):
+        slot = {'id': 'slot-1', 'executablePath': 'terminal64.exe', 'dataPath': '.'}
+        agent = InventoryAgent({'apiBaseUrl': 'https://api.example', 'nodeId': 'node-1', 'slots': [slot]}, 'a' * 43)
+        remote = dict(nodeId='node-1', slots=[dict(slot, generation=None)], terminalBuilds=[6231])
+        agent.client.call = MagicMock(return_value=remote)
+        agent.connect()
+        snapshot.return_value = dict(status='STARTING', processId=12, processIdentity='12:34',
+                                     catalogHash='a' * 64, serverNames=['Example-Demo'],
+                                     verificationMethod='login_dialog', errorCode=None)
+        report = agent.report_slot(slot, inspect_ui=True)
+        self.assertEqual(report['errorCode'], 'API_TERMINAL_BUILD_UNSUPPORTED')
+        self.assertEqual(report['status'], 'ERROR')
+        payload = agent.client.call.call_args.args[1]
+        self.assertEqual(payload['serverNames'], [])
+        self.assertEqual(payload['processIdentity'], '12:34')
+        remote['terminalBuilds'] = [6231, 6246]
+        agent.connect()
+        self.assertEqual(agent.report_slot(slot)['status'], 'STARTING')
+
+    def test_invalid_api_build_capability_fails_closed(self):
+        agent = InventoryAgent({'apiBaseUrl': 'https://api.example', 'nodeId': 'node-1', 'slots': []}, 'a' * 43)
+        for builds in ([True], [], '6246', [None]):
+            agent.client.call = MagicMock(return_value=dict(nodeId='node-1', slots=[], terminalBuilds=builds))
+            with self.assertRaisesRegex(AgentError, 'API_CONFIG_INVALID'):
+                agent.connect()
+
     def test_http_conflict_preserves_only_allowlisted_reason_and_operation(self):
         client = NodeClient('https://api.example', 'node-1', 'a' * 43)
         bodies = [(b'{"message":"LEASE_LOST","password":"SECRET"}', 'LEASE_LOST'),
