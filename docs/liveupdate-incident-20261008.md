@@ -21,7 +21,9 @@
 
 ## Validation and operational limits
 
-225 unit tests passed before deployment, including updater visibility, orphaned update files, startup race, durable cooldown, corrupt state and exact read-only build checks. Canary UI: MetaQuotes signature valid, 459 server names, FundingPips read-only Netting caption. Record production collection evidence after rollout.
+227 unit tests passed, including updater visibility, orphaned update files, startup race, durable cooldown, corrupt state, API build negotiation and exact read-only build checks. Canary UI: MetaQuotes signature valid, 459 server names, FundingPips read-only Netting caption.
+
+Production: API commit `1513b2f` deployed successfully through GitHub Actions/Fly; both health and readiness returned HTTP 200. Worker and watchdog run immutable release `mt5-c9306f5` from 16:26 UTC. A single operator-authorized cooldown reset after fixing API compatibility recovered the expired canary lease; the local audit is `C:\TradeTrack\handoff\mt5-canary-recovery-20261008.json`. Demo-01 completed accepted collections at 16:28:19 and 16:28:27 UTC on build 6246. All ten slots returned to current readiness without quarantine. Earlier canary HTTP 400/lease conflicts are rollout history, not claimed as a clean first deployment.
 
 Unknown future builds still require compatibility review. An interactive/elevated updater may require operator action; the controller must alert and preserve other slots instead of bypassing it. These changes bound recovery and prevent the identified relaunch path; they cannot guarantee that third-party MT5 updates never fail. Never copy an executable over a live terminal or delete account configuration to resolve an update.
 
