@@ -146,10 +146,13 @@ class AgentTests(unittest.TestCase):
         remote['terminalBuilds'] = [6231, 6246]
         agent.connect()
         self.assertEqual(agent.report_slot(slot)['status'], 'STARTING')
+        del remote['terminalBuilds']
+        agent.connect()
+        self.assertEqual(agent.report_slot(slot)['errorCode'], 'API_TERMINAL_BUILD_UNSUPPORTED')
 
     def test_invalid_api_build_capability_fails_closed(self):
         agent = InventoryAgent({'apiBaseUrl': 'https://api.example', 'nodeId': 'node-1', 'slots': []}, 'a' * 43)
-        for builds in ([True], [], '6246', [None]):
+        for builds in ([True], [], '6246', [None], None):
             agent.client.call = MagicMock(return_value=dict(nodeId='node-1', slots=[], terminalBuilds=builds))
             with self.assertRaisesRegex(AgentError, 'API_CONFIG_INVALID'):
                 agent.connect()

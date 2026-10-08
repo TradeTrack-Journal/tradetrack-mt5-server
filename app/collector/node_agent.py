@@ -147,11 +147,13 @@ class InventoryAgent:
         remote = self.client.call("/config")
         if remote.get("nodeId") != self.config["nodeId"] or not isinstance(remote.get("slots"), list):
             raise AgentError("API_CONFIG_INVALID")
-        builds = remote.get('terminalBuilds')
-        if builds is not None and (not isinstance(builds, list) or not 0 < len(builds) <= 64
-                                   or any(type(build) is not int or build <= 0 for build in builds)):
+        # Legacy APIs accepted exactly these builds. Absence of negotiation must
+        # never be interpreted as permission for a newly reviewed local build.
+        builds = remote.get('terminalBuilds', [6182, 6190, 6193, 6204, 6230, 6231])
+        if (not isinstance(builds, list) or not 0 < len(builds) <= 64
+                or any(type(build) is not int or build <= 0 for build in builds)):
             raise AgentError('API_CONFIG_INVALID')
-        self.accepted_builds = set(builds) if builds is not None else None
+        self.accepted_builds = set(builds)
         self.remote_slots = {slot["id"]: slot for slot in remote["slots"] if isinstance(slot, dict) and isinstance(slot.get("id"), str)}
         if set(self.remote_slots) != {slot["id"] for slot in self.config["slots"]}:
             raise AgentError("SLOT_CONFIG_MISMATCH")

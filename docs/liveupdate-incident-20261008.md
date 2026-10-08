@@ -17,7 +17,7 @@
 4. Keep existing bounded recovery only for an unchanged, silent, positively identified updater. Never terminate an unknown process or click an arbitrary update/UAC dialog. Persistent visible or unverifiable updater state raises a specific diagnostic after ten minutes of unchanged evidence.
 5. Apply a durable shared restart budget to graceful and forced recovery: at least 120 seconds between different terminal restarts and 900 seconds between replacements of the same slot. Rechecking the same fenced process is idempotent. Corrupt budget state fails closed.
 6. Deploy worker and watchdog from the same immutable release. Both use the Python supervisor and DPAPI-loaded credentials; no PowerShell startup dependency. Watchdog respects the production drain marker and inherits existing Sentry configuration. Existing telemetry deduplication applies to the new diagnostic codes.
-7. Deploy API build support before the worker. The first canary completion exposed the API's independent build allowlist (HTTP 400). API config now advertises `terminalBuilds` directly from its result schema; the worker reports incompatible slots as unready before claiming a job. Older APIs without this capability remain backward compatible. Native access and account identity checks still apply.
+7. Deploy API build support before the worker. The first canary completion exposed the API's independent build allowlist (HTTP 400). API config now advertises `terminalBuilds` directly from its result schema; the worker reports incompatible slots as unready before claiming a job. Older APIs without this capability are restricted to their known pre-6246 build set. Native access and account identity checks still apply.
 
 ## Validation and operational limits
 
