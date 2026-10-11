@@ -37,11 +37,14 @@ def update_running(executable):
                 # Process enumeration can miss an elevated updater, and a newly
                 # handed-off updater may not yet be visible. Its executable is
                 # evidence of an unfinished update, never permission to relaunch.
-                from .update_recovery import observe_blocked_update
+                from .update_recovery import observe_blocked_update, recover_orphaned_update
+                with native.inventory_lock(str(executable)):
+                    if recover_orphaned_update(native, executable, updater):
+                        continue
                 observe_blocked_update(executable, updater, 'UPDATE_PROCESS_UNVERIFIED')
                 return True
         except (OSError, UnicodeError):
-            continue
+            return True  # An unreadable/locked package is never permission to relaunch.
         except InventoryError as error:
             if str(error) == 'AMBIGUOUS_TERMINAL_PROCESS':
                 return True

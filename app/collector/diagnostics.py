@@ -26,6 +26,7 @@ API_REASONS = {
     'INVENTORY_LIMIT': 'The inventory exceeds the supported slot or server-state limit.',
 }
 EXPLANATIONS = {
+    'UPDATE_FILES_BUSY': 'MT5 update files are in use or inaccessible. Recovery preserves them and retries; it never relaunches over an active updater.',
     'API_TERMINAL_BUILD_UNSUPPORTED': 'This MT5 build passed local review but the API does not accept it yet. Deploy API compatibility before enabling this slot.',
     'TERMINAL_BUILD_UNSUPPORTED': 'MT5 updated to an unverified build. Only this slot is blocked until compatibility is reviewed.',
     'UPDATE_REQUIRES_ATTENTION': 'MT5 updater has shown a persistent dialog for at least ten minutes. Automatic terminal relaunch is blocked.',
