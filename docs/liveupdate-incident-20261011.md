@@ -16,3 +16,8 @@ Under the existing per-slot mutex, require absent main/updater processes, two id
 
 ## Limits
 This repairs the observed automatic-recovery deadlock; it does not establish the original cause of every IPC failure. Visible or inaccessible live updater processes remain protected. New MT5 builds still require compatibility validation. A restart cannot fix invalid credentials or missing owner access confirmation.
+
+## Deployment and end-to-end result (21:50 UTC)
+Deployed release mt5-70448c1 to both scheduled supervisors after graceful worker drain. All ten slots have fresh heartbeats, no inventory errors, and no quarantine; no expired running jobs. Worker and watchdog stderr are empty. Production collection succeeded after deployment on at least seven slots.
+
+Retried six connections paused on October 10 through the authenticated admin retry flow, with audit reasons. Five resumed collection and journal imports: 252747356, 251025435, 478418311, 460227947, 5057038278. Account 460179552 returned native "Invalid account" and then AUTH_FAILED; it remains paused and needs owner/broker verification. No access-confirmation or identity guards were bypassed. Together with four already-active accounts, nine connections resumed imports during this recovery.
