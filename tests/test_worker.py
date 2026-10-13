@@ -184,8 +184,10 @@ class GatewayTests(unittest.TestCase):
     def test_ipc_timeout_requires_terminal_recovery(self):
         self.native.initialize.return_value = False
         self.native.last_error.return_value = (-10005, 'synthetic secret broker text')
-        with self.assertRaisesRegex(CollectionError, '^TERMINAL_IPC_UNAVAILABLE$'):
+        with self.assertRaisesRegex(CollectionError, '^TERMINAL_IPC_UNAVAILABLE$') as failure:
             collect(self.request, self.native, self.windows)
+        self.assertEqual(failure.exception.diagnostics, {'nativeOperation': 'initialize', 'nativeErrorCode': -10005})
+        self.assertNotIn('synthetic secret', str(failure.exception.diagnostics))
         self.native.login.assert_not_called()
         self.native.history_deals_get.assert_not_called()
 

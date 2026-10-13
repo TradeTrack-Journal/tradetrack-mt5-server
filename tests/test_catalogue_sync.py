@@ -67,7 +67,7 @@ class CatalogueSyncTests(unittest.TestCase):
 
     def test_busy_api_fence_prevents_shutdown_and_writes(self):
         self.target.client.call.side_effect = AgentError('API_HTTP_409')
-        with patch('app.collector.catalogue_sync.close_terminal') as close:
+        with patch('app.collector.catalogue_sync.stop_fenced_terminal') as close:
             with self.assertRaisesRegex(AgentError, 'API_HTTP_409'):
                 synchronize_once([self.source, self.target])
         close.assert_not_called()
@@ -75,10 +75,10 @@ class CatalogueSyncTests(unittest.TestCase):
 
     def test_restart_backup_and_no_credential_copy(self):
         self.target.windows.find_process.side_effect = [(12, '12:34'), (None, None)]
-        def close(native, executable):
+        def close(native, executable, identity, client, slot_id):
             self.target.client.call.assert_called_once_with('/slots/demo-02/prepare', {'generation': 'generation'})
             self.assertEqual(Path(self.target.slot['dataPath'], 'config/servers.dat').read_bytes(), b'old')
-        with patch('app.collector.catalogue_sync.close_terminal', side_effect=close), \
+        with patch('app.collector.catalogue_sync.stop_fenced_terminal', side_effect=close), \
                 patch('app.collector.catalogue_sync.start_terminal', return_value=True):
             result = synchronize_once([self.source, self.target])
         self.assertEqual(result['addedServers'], 1)
@@ -96,23 +96,23 @@ class CatalogueSyncTests(unittest.TestCase):
         self.target.client.call.assert_not_called()
         self.assertFalse((self.root / 'server-catalogs').exists())
 
-    def test_hung_close_uses_exact_fenced_process_and_still_installs(self):
+    def test_maintenance_stops_exact_fenced_process_without_update_handoff(self):
         self.target.windows.find_process.side_effect = [(12, '12:34'), (12, '12:34'), (None, None)]
         self.target.client.call.side_effect = [None, {'slots': [
             {'id': 'demo-02', 'quarantineIdentity': '12:34', 'generation': 'generation'}]}]
-        with patch('app.collector.catalogue_sync.close_terminal', side_effect=InventoryError('TERMINAL_STOP_TIMEOUT')), \
-                patch('app.collector.catalogue_sync.terminate_verified') as terminate, \
+        with patch('app.collector.restart_budget.reserve_restart'), \
+                patch('app.collector.update_recovery.terminate_verified') as terminate, \
                 patch('app.collector.catalogue_sync.start_terminal', return_value=True):
             result = synchronize_once([self.source, self.target])
             terminate.assert_called_once_with(self.target.windows, Path(self.target.slot['executablePath']).resolve(), 12, '12:34')
         self.assertTrue(result['terminalStarted'])
         self.assertEqual(Path(self.target.slot['dataPath'], 'config/servers.dat').read_bytes(), b'new')
 
-    def test_fence_change_during_hung_close_never_terminates_or_writes(self):
+    def test_fence_change_never_terminates_or_writes(self):
         self.target.client.call.side_effect = [None, {'slots': [
             {'id': 'demo-02', 'quarantineIdentity': 'replacement', 'generation': 'generation'}]}]
-        with patch('app.collector.catalogue_sync.close_terminal', side_effect=InventoryError('TERMINAL_STOP_TIMEOUT')), \
-                patch('app.collector.catalogue_sync.terminate_verified') as terminate:
+        with patch('app.collector.restart_budget.reserve_restart'), \
+                patch('app.collector.update_recovery.terminate_verified') as terminate:
             with self.assertRaisesRegex(InventoryError, 'TERMINAL_CHANGED'):
                 synchronize_once([self.source, self.target])
             terminate.assert_not_called()

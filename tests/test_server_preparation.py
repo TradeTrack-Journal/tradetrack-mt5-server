@@ -83,13 +83,13 @@ class PreparationTests(unittest.TestCase):
             self.preparation.native.inventory_lock.side_effect = lambda _: nullcontext()
             stopped = set()
             self.preparation.native.find_process.side_effect = lambda executable: (None, None) if executable in stopped else (123, 'identity')
-            def close(native, executable):
+            def close(native, executable, *fence):
                 if executable.parent == slot:
                     self.worker.client.call.assert_any_call('/slots/test-slot/prepare', {'generation':'test-generation'})
                     self.assertTrue((slot / '.server-preparing').exists())
                     self.assertEqual((slot / 'config/servers.dat').read_bytes(), b'old-catalog')
                 stopped.add(str(executable))
-            with patch('app.collector.server_preparation.close_terminal', side_effect=close), patch('app.collector.server_preparation.start_terminal') as start, patch('app.collector.server_preparation.catalogue_fingerprint', return_value='old-hash'):
+            with patch('app.collector.server_preparation.close_terminal', side_effect=close), patch('app.collector.server_preparation.stop_fenced_terminal', side_effect=close), patch('app.collector.server_preparation.start_terminal') as start, patch('app.collector.server_preparation.catalogue_fingerprint', return_value='old-hash'):
                 result = self.preparation.once([self.worker])
             self.assertEqual(result['state'], 'AWAITING_FRESH_INVENTORY')
             self.assertEqual((slot / 'config/servers.dat').read_bytes(), b'new-catalog')

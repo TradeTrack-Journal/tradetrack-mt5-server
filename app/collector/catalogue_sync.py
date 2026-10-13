@@ -5,10 +5,9 @@ import os
 import shutil
 import time
 
-from .server_preparation import close_terminal, start_terminal
+from .server_preparation import stop_fenced_terminal, start_terminal
 from .windows_inventory import InventoryError, catalogue_fingerprint
 from .terminal_build import VERIFIED_BUILDS
-from .update_recovery import terminate_verified
 
 
 def verified_snapshot(worker):
@@ -69,20 +68,7 @@ def install_catalogue(worker, data, source_names, source_build):
         session = worker.inventory.sessions[slot['id']]
         # API atomically refuses RUNNING jobs and quarantines the old process.
         worker.client.call(f"/slots/{slot['id']}/prepare", {'generation': session['generation']})
-        try:
-            close_terminal(native, executable)
-        except InventoryError as exc:
-            if str(exc) != 'TERMINAL_STOP_TIMEOUT':
-                raise
-            # Same recovery rule as the watchdog: only the exact fenced old
-            # process, after graceful close and an authoritative fence recheck.
-            remote = worker.client.call('/config')
-            fenced = next((s for s in remote.get('slots', []) if s.get('id') == slot['id']), {})
-            if (fenced.get('quarantineIdentity') != identity or
-                    fenced.get('generation') != session['generation'] or
-                    native.find_process(str(executable)) != (pid, identity)):
-                raise InventoryError('TERMINAL_CHANGED') from None
-            terminate_verified(native, executable, pid, identity)
+        stop_fenced_terminal(native, executable, identity, worker.client, slot['id'])
         if native.find_process(str(executable))[0]:
             raise InventoryError('SLOT_MUST_BE_STOPPED')
         target = root / 'config' / 'servers.dat'

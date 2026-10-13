@@ -106,11 +106,11 @@ class SlotWorker:
         if self.restart_identity:
             # Set after /fail acknowledged, or after the server fenced an expired lease.
             # Recovery runs on the UI thread and never stops other slots.
-            from .server_preparation import close_terminal, start_terminal
+            from .server_preparation import stop_fenced_terminal, start_terminal
             with self.windows.inventory_lock(slot['executablePath']):
                 pid, identity = self.windows.find_process(slot['executablePath'])
                 if identity == self.restart_identity:
-                    close_terminal(self.windows, slot['executablePath'])
+                    stop_fenced_terminal(self.windows, slot['executablePath'], self.restart_identity, self.inventory.client, slot['id'])
                     pid = None
                 if not pid:
                     if start_terminal(slot['executablePath']) is False:
@@ -187,7 +187,15 @@ class SlotWorker:
                 if result["errorCode"] in ("CHILD_TIMEOUT", "CHILD_FAILED", "IDENTITY_DRIFT", "TERMINAL_CHANGED", "TERMINAL_IPC_UNAVAILABLE"):
                     self.restart_identity = identity
                     raise AgentError("TERMINAL_QUARANTINED")
-                return {"slotId": slot["id"], "state": "failed", "errorCode": result["errorCode"]}
+                # Keep only bounded numeric diagnostics locally; never native text,
+                # credentials or account payloads. API failure contract stays unchanged.
+                details = {}
+                if result.get('nativeOperation') in ('initialize', 'login'):
+                    details['nativeOperation'] = result['nativeOperation']
+                code = result.get('nativeErrorCode')
+                if type(code) is int and -100000 <= code <= 100000:
+                    details['nativeErrorCode'] = code
+                return {"slotId": slot["id"], "state": "failed", "errorCode": result["errorCode"], **details}
             if self.windows.process_identity(pid, slot["executablePath"]) != identity:
                 self.client.call(path + "/fail", dict(lease, errorCode="TERMINAL_CHANGED"))
                 self.restart_identity = identity

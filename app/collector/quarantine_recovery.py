@@ -1,8 +1,7 @@
 """Recover server-fenced slots without interrupting a collection or replacement PID."""
 from .node_agent import InventoryAgent
-from .server_preparation import close_terminal, start_terminal
+from .server_preparation import stop_fenced_terminal, start_terminal
 from .windows_inventory import InventoryError, WindowsTerminal
-from .update_recovery import terminate_verified
 
 
 def recover_quarantined(config, token, slot):
@@ -20,20 +19,7 @@ def recover_quarantined(config, token, slot):
         # API sets quarantine atomically with lease release; claims are fenced until
         # a different process is reported. Never bypass or clear that server fence.
         if pid:
-            try:
-                close_terminal(native, slot['executablePath'])
-            except InventoryError as exc:
-                if str(exc) not in {'TERMINAL_STOP_TIMEOUT', 'TERMINAL_UI_BUSY',
-                                    'UI_CLEANUP_FAILED', 'UI_TIMEOUT', 'UI_DIALOG_UNAVAILABLE'}:
-                    raise
-                # A fenced dedicated terminal may have blocked modal UI. Revalidate the
-                # server fence and pin the exact process handle before forcing it.
-                agent.connect()
-                if agent.remote_slots[slot['id']].get('quarantineIdentity') != identity:
-                    return 'fence_changed'
-                if native.find_process(slot['executablePath']) != (pid, identity):
-                    return 'replacement_pending_report'
-                terminate_verified(native, slot['executablePath'], pid, identity)
+            stop_fenced_terminal(native, slot['executablePath'], identity, agent.client, slot['id'])
         if start_terminal(slot['executablePath']) is False:
             return 'update_pending'
         return 'restarted'

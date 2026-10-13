@@ -88,10 +88,50 @@ def _launch_terminal(executable):
     return True
 
 
+def stop_fenced_terminal(native, executable, identity, client, slot_id):
+    """Stop only an API-fenced managed process without MT5's LiveUpdate handoff.
+
+    Caller owns the slot mutex. A graceful WM_CLOSE runs the pending updater,
+    which can wait indefinitely for UAC credentials on unattended machines.
+    The server fence proves no collection may run; credentials remain in the
+    disposable collector, and the next process must pass fresh inventory.
+    """
+    from .restart_budget import reserve_restart
+    from .update_recovery import terminate_verified
+    remote = client.call('/config')
+    fenced = next((s for s in remote.get('slots', []) if s.get('id') == slot_id), {})
+    if not identity or fenced.get('quarantineIdentity') != identity:
+        raise InventoryError('TERMINAL_CHANGED')
+    pid, current = native.find_process(str(executable))
+    if not pid:
+        return
+    if current != identity:
+        raise InventoryError('TERMINAL_CHANGED')
+    reserve_restart(executable, identity)
+    terminate_verified(native, executable, pid, identity)
+
+
+def staged_update_exists(executable):
+    root = Path(os.environ.get('APPDATA', '')) / 'MetaQuotes' / 'Terminal'
+    for origin in root.glob('*/origin.txt'):
+        try:
+            raw = origin.read_bytes()
+            value = raw.decode('utf-16') if raw.startswith((b'\xff\xfe', b'\xfe\xff')) else raw.decode('utf-8-sig')
+            if Path(value.strip()).resolve() == Path(executable).resolve().parent:
+                folder = origin.parent / 'liveupdate'
+                if folder.exists() and any(p.is_file() for p in folder.iterdir()):
+                    return True
+        except (OSError, UnicodeError):
+            return True
+    return False
+
+
 def close_terminal(native, executable):
     pid, identity = native.find_process(str(executable))
     if not pid:
         return
+    if staged_update_exists(executable):
+        raise InventoryError('UPDATE_MAINTENANCE_REQUIRED')
     from .restart_budget import reserve_restart
     reserve_restart(executable, identity)
     mains = [h for h in native.windows(pid) if native.class_name(h) == 'MetaQuotes::MetaTrader::5.00']
@@ -185,7 +225,7 @@ class ServerPreparation:
                         pass
                     try:
                         worker.client.call(f"/slots/{worker.slot['id']}/prepare", {'generation': session['generation']})
-                        close_terminal(self.native, executable)
+                        stop_fenced_terminal(self.native, executable, session['processIdentity'], worker.client, worker.slot['id'])
                         if self.native.find_process(str(executable))[0]:
                             raise InventoryError('SLOT_MUST_BE_STOPPED')
                         target = target_root / 'config' / 'servers.dat'

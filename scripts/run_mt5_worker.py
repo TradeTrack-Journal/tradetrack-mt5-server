@@ -40,7 +40,7 @@ def child():
             raise CollectionError("BATCH_TOO_LARGE")
         print(output)
     except CollectionError as exc:
-        print(json.dumps({"errorCode": str(exc)}))
+        print(json.dumps({"errorCode": str(exc), **exc.diagnostics}))
     except Exception:
         print(json.dumps({"errorCode": "CHILD_FAILED"}))
 

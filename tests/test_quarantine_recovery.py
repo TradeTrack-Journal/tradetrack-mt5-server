@@ -10,7 +10,7 @@ class QuarantineRecoveryTests(unittest.TestCase):
         slot = {'id': 'demo-01', 'executablePath': 'C:/slot/terminal64.exe'}
         with patch('app.collector.quarantine_recovery.InventoryAgent') as agent, \
              patch('app.collector.quarantine_recovery.WindowsTerminal') as native, \
-             patch('app.collector.quarantine_recovery.close_terminal') as close, \
+             patch('app.collector.quarantine_recovery.stop_fenced_terminal') as close, \
              patch('app.collector.quarantine_recovery.start_terminal') as start:
             agent.return_value.remote_slots = {'demo-01': {'quarantineIdentity': quarantine}}
             native.return_value.find_process.return_value = process
@@ -38,37 +38,13 @@ class QuarantineRecoveryTests(unittest.TestCase):
                 recover_quarantined({}, 'token', {'executablePath': 'C:/slot/terminal64.exe'})
             agent.return_value.connect.assert_not_called()
 
-    def test_force_close_requires_unchanged_server_fence(self):
-        for changed in (False, True):
-            with patch('app.collector.quarantine_recovery.InventoryAgent') as agent, \
-                 patch('app.collector.quarantine_recovery.WindowsTerminal') as native, \
-                 patch('app.collector.quarantine_recovery.close_terminal', side_effect=InventoryError('TERMINAL_STOP_TIMEOUT')), \
-                 patch('app.collector.quarantine_recovery.start_terminal', return_value=True), \
-                 patch('app.collector.quarantine_recovery.terminate_verified') as terminate:
-                agent.return_value.remote_slots = {'demo-01': {'quarantineIdentity': '42:1'}}
-                if changed:
-                    def refresh():
-                        if agent.return_value.connect.call_count == 2:
-                            agent.return_value.remote_slots['demo-01']['quarantineIdentity'] = None
-                    agent.return_value.connect.side_effect = refresh
-                native.return_value.find_process.return_value = (42, '42:1')
-                result = recover_quarantined({}, 'token', {'id': 'demo-01', 'executablePath': 'terminal.exe'})
-                self.assertEqual(terminate.call_count, 0 if changed else 1)
-                self.assertEqual(result, 'fence_changed' if changed else 'restarted')
-
-    def test_fenced_modal_failure_can_recover_but_unknown_error_cannot(self):
-        for code in ('TERMINAL_UI_BUSY', 'UNSUPPORTED_TERMINAL_UI'):
-            with patch('app.collector.quarantine_recovery.InventoryAgent') as agent, \
-                 patch('app.collector.quarantine_recovery.WindowsTerminal') as native, \
-                 patch('app.collector.quarantine_recovery.close_terminal', side_effect=InventoryError(code)), \
-                 patch('app.collector.quarantine_recovery.start_terminal', return_value=True), \
-                 patch('app.collector.quarantine_recovery.terminate_verified') as terminate:
-                agent.return_value.remote_slots = {'one': {'quarantineIdentity': '42:1'}}
-                native.return_value.find_process.return_value = (42, '42:1')
-                if code == 'TERMINAL_UI_BUSY':
-                    self.assertEqual(recover_quarantined({}, 'token', {'id': 'one', 'executablePath': 'terminal.exe'}), 'restarted')
-                    terminate.assert_called_once()
-                else:
-                    with self.assertRaisesRegex(InventoryError, code):
-                        recover_quarantined({}, 'token', {'id': 'one', 'executablePath': 'terminal.exe'})
-                    terminate.assert_not_called()
+    def test_failed_fence_check_never_launches_replacement(self):
+        with patch('app.collector.quarantine_recovery.InventoryAgent') as agent, \
+             patch('app.collector.quarantine_recovery.WindowsTerminal') as native, \
+             patch('app.collector.quarantine_recovery.stop_fenced_terminal', side_effect=InventoryError('TERMINAL_CHANGED')), \
+             patch('app.collector.quarantine_recovery.start_terminal') as start:
+            agent.return_value.remote_slots = {'one': {'quarantineIdentity': '42:1'}}
+            native.return_value.find_process.return_value = (42, '42:1')
+            with self.assertRaisesRegex(InventoryError, 'TERMINAL_CHANGED'):
+                recover_quarantined({}, 'token', {'id': 'one', 'executablePath': 'terminal.exe'})
+            start.assert_not_called()

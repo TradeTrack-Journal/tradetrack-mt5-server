@@ -14,16 +14,24 @@ from .windows_inventory import InventoryError, WindowsTerminal, validate_data_pa
 
 
 class CollectionError(Exception):
-    pass
+    def __init__(self, code, *, operation=None, native_code=None):
+        super().__init__(code)
+        self.diagnostics = {}
+        if operation in ('initialize', 'login'):
+            self.diagnostics['nativeOperation'] = operation
+        if type(native_code) is int and -100000 <= native_code <= 100000:
+            self.diagnostics['nativeErrorCode'] = native_code
 
 
-def connection_error(native):
+def connection_error(native, diagnostics=None):
     """Only numeric documented codes leave the native boundary; never error text."""
     try:
         error = native.last_error()
         code = error[0] if isinstance(error, tuple) and error and type(error[0]) is int else None
     except Exception:
         code = None
+    if diagnostics is not None and type(code) is int and -100000 <= code <= 100000:
+        diagnostics['nativeErrorCode'] = code
     if code == -6:
         return 'AUTH_FAILED'
     if code in (-10000, -10001, -10002, -10003, -10005):
@@ -67,9 +75,9 @@ def investor_evidence(data_path, baseline, login):
     return any(line.split("\t")[-1].strip() == expected for line in fresh_journal_lines(data_path, baseline))
 
 
-def login_failure(native, data_path, baseline, login, server, *, settle_seconds=10):
+def login_failure(native, data_path, baseline, login, server, *, settle_seconds=10, diagnostics=None):
     # Capture immediately: later native calls could overwrite the failure code.
-    code = connection_error(native)
+    code = connection_error(native, diagnostics)
     if code not in ('AUTH_FAILED', 'CONNECTION_FAILED'):
         return code
     # Both -6 and generic failures are ambiguous. Broker transport evidence must
@@ -162,9 +170,13 @@ def collect(request, native=None, windows=None):
             baseline = None
         if not native.initialize(executable, login=int(login), password=credentials["investorPassword"], server=server,
                                  portable=Path(data_path).resolve() == Path(executable).parent.resolve(), timeout=20000):
-            raise CollectionError(login_failure(native, data_path, baseline, login, server))
+            details = {}
+            code = login_failure(native, data_path, baseline, login, server, diagnostics=details)
+            raise CollectionError(code, operation='initialize', native_code=details.get('nativeErrorCode'))
         if not native.login(int(login), password=credentials["investorPassword"], server=server, timeout=20000):
-            raise CollectionError(login_failure(native, data_path, baseline, login, server))
+            details = {}
+            code = login_failure(native, data_path, baseline, login, server, diagnostics=details)
+            raise CollectionError(code, operation='login', native_code=details.get('nativeErrorCode'))
         credentials.pop("investorPassword", None)
         # Native login can complete before the Windows caption is repainted.
         # Only the initial caption may settle; every retry rechecks account,

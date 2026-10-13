@@ -17,16 +17,16 @@ class RecoveryTests(TestCase):
 
     def test_only_quarantined_process_restarts(self):
         worker = self.worker('old')
-        with patch('app.collector.server_preparation.close_terminal') as close, patch('app.collector.server_preparation.start_terminal') as start:
+        with patch('app.collector.server_preparation.stop_fenced_terminal') as close, patch('app.collector.server_preparation.start_terminal') as start:
             self.assertEqual(worker.prepare_inventory()['state'], 'restarting')
-            close.assert_called_once_with(worker.windows, 'terminal.exe')
+            close.assert_called_once_with(worker.windows, 'terminal.exe', 'old', worker.inventory.client, 'demo-02')
             start.assert_called_once_with('terminal.exe')
         self.assertEqual(worker.restart_identity, 'old')
         self.assertEqual(worker.inspected_at, 0)
 
     def test_new_process_is_not_stopped(self):
         worker = self.worker('new')
-        with patch('app.collector.server_preparation.close_terminal') as close, patch('app.collector.server_preparation.start_terminal') as start:
+        with patch('app.collector.server_preparation.stop_fenced_terminal') as close, patch('app.collector.server_preparation.start_terminal') as start:
             worker.prepare_inventory()
             close.assert_not_called()
             start.assert_not_called()
@@ -104,7 +104,7 @@ class RecoveryTests(TestCase):
         worker.inspected_at = 0
         worker.inventory = MagicMock()
         worker.inventory.remote_slots = {'demo-02': {'quarantineIdentity': 'old'}}
-        with patch('app.collector.server_preparation.close_terminal') as close, patch('app.collector.server_preparation.start_terminal'):
+        with patch('app.collector.server_preparation.stop_fenced_terminal') as close, patch('app.collector.server_preparation.start_terminal'):
             self.assertEqual(worker.prepare_inventory()['state'], 'restarting')
             close.assert_called_once()
         worker.inventory.report_slot.assert_not_called()
