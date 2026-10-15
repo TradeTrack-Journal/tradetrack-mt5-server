@@ -18,8 +18,7 @@ def recover_quarantined(config, token, slot):
             return 'replacement_pending_report'
         # API sets quarantine atomically with lease release; claims are fenced until
         # a different process is reported. Never bypass or clear that server fence.
-        if pid:
-            stop_fenced_terminal(native, slot['executablePath'], identity, agent.client, slot['id'])
+        stop_fenced_terminal(native, slot['executablePath'], identity, agent.client, slot['id'])
         if start_terminal(slot['executablePath']) is False:
             return 'update_pending'
         return 'restarted'

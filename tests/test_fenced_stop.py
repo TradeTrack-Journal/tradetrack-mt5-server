@@ -13,6 +13,7 @@ class FencedStopTests(TestCase):
         self.client.call.return_value = {'slots': [{'id': 'demo-01', 'quarantineIdentity': '42:1'}]}
         self.reserve = patch('app.collector.restart_budget.reserve_restart').start()
         self.terminate = patch('app.collector.update_recovery.terminate_verified').start()
+        self.defer = patch('app.collector.update_recovery.defer_staged_updates').start()
         self.addCleanup(patch.stopall)
 
     def stop(self):
@@ -23,6 +24,7 @@ class FencedStopTests(TestCase):
         self.client.call.assert_called_once_with('/config')
         self.reserve.assert_called_once_with('terminal.exe', '42:1')
         self.terminate.assert_called_once_with(self.native, 'terminal.exe', 42, '42:1')
+        self.defer.assert_called_once_with(self.native, 'terminal.exe')
         self.native.u.PostMessageW.assert_not_called()
         self.native.defer_live_update.assert_not_called()
 
@@ -33,12 +35,19 @@ class FencedStopTests(TestCase):
                 self.stop()
         self.terminate.assert_not_called()
         self.reserve.assert_not_called()
+        self.defer.assert_not_called()
 
     def test_other_slot_fence_does_not_authorize_stop(self):
         self.client.call.return_value['slots'][0]['id'] = 'demo-02'
         with self.assertRaisesRegex(InventoryError, 'TERMINAL_CHANGED'):
             self.stop()
         self.terminate.assert_not_called()
+
+    def test_locked_update_prevents_successful_stop_handoff(self):
+        self.defer.side_effect = InventoryError('UPDATE_FILES_BUSY')
+        with self.assertRaisesRegex(InventoryError, 'UPDATE_FILES_BUSY'):
+            self.stop()
+        self.native.u.PostMessageW.assert_not_called()
 
     def test_reused_pid_is_preserved(self):
         self.native.find_process.return_value = (42, '42:2')

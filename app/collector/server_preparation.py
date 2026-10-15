@@ -97,18 +97,20 @@ def stop_fenced_terminal(native, executable, identity, client, slot_id):
     disposable collector, and the next process must pass fresh inventory.
     """
     from .restart_budget import reserve_restart
-    from .update_recovery import terminate_verified
+    from .update_recovery import terminate_verified, defer_staged_updates
     remote = client.call('/config')
     fenced = next((s for s in remote.get('slots', []) if s.get('id') == slot_id), {})
     if not identity or fenced.get('quarantineIdentity') != identity:
         raise InventoryError('TERMINAL_CHANGED')
     pid, current = native.find_process(str(executable))
     if not pid:
+        defer_staged_updates(native, executable)
         return
     if current != identity:
         raise InventoryError('TERMINAL_CHANGED')
     reserve_restart(executable, identity)
     terminate_verified(native, executable, pid, identity)
+    defer_staged_updates(native, executable)
 
 
 def staged_update_exists(executable):

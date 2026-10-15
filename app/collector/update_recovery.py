@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from ctypes import wintypes as w
 from pathlib import Path
 import time
+import os
 
 from .windows_inventory import InventoryError
 
@@ -15,6 +16,61 @@ _observations = {}
 _blocked = {}
 _orphans = {}
 STALL_SECONDS = 600
+
+
+def defer_staged_updates(native, executable):
+    """Preserve pending updates before an API-fenced unattended restart.
+
+    Caller holds the slot mutex and has freshly verified its API quarantine.
+    A forced stop alone is insufficient: MT5 also installs on its next start.
+    This is deliberate maintenance deferral, not a claim that files are orphaned.
+    Running/inaccessible installers remain untouched; no UAC or ACL changes.
+    """
+    executable = Path(executable).resolve()
+    root = Path(os.environ.get('APPDATA', '')) / 'MetaQuotes' / 'Terminal'
+    if native.find_process(str(executable))[0] is not None:
+        raise InventoryError('SLOT_MUST_BE_STOPPED')
+    for origin in root.glob('*/origin.txt'):
+        if origin.is_symlink() or origin.parent.is_symlink() or origin.parent.is_junction():
+            raise InventoryError('UPDATE_PATH_UNSAFE')
+        with origin.open('rb') as stream:
+            raw = stream.read(8193)
+        if len(raw) > 8192:
+            raise InventoryError('UPDATE_PATH_UNSAFE')
+        value = raw.decode('utf-16') if raw.startswith((b'\xff\xfe', b'\xfe\xff')) else raw.decode('utf-8-sig')
+        if Path(value.strip()).resolve() != executable.parent:
+            continue
+        directory = origin.parent / 'liveupdate'
+        if directory.is_symlink() or directory.is_junction():
+            raise InventoryError('UPDATE_PATH_UNSAFE')
+        if not directory.exists():
+            continue
+        updater = directory / 'terminal64.exe'
+        if native.find_process(str(updater))[0] is not None:
+            raise InventoryError('UPDATE_FILES_BUSY')
+        signature = fingerprint(directory, executable)
+        package = [Path(path) for path, _, _ in signature if Path(path).is_relative_to(directory)]
+        if not package:
+            continue
+        destination = directory.with_name(f'liveupdate-deferred-{time.time_ns()}')
+        if destination.exists() or not destination.is_relative_to(directory.parent):
+            raise InventoryError('UPDATE_PATH_UNSAFE')
+        # Even a hidden/elevated installer must not be mistaken for absent.
+        # Its executable/package locks deny these opens. Retain the handles
+        # throughout archival, and move the executable last on partial failure.
+        with exclusive_update_files([path for path, _, _ in signature]):
+            if (native.find_process(str(executable))[0] is not None
+                    or native.find_process(str(updater))[0] is not None
+                    or fingerprint(directory, executable) != signature):
+                raise InventoryError('UPDATE_FILES_BUSY')
+            destination.mkdir()
+            package.sort(key=lambda path: path == updater.resolve())
+            for path in package:
+                target = destination / path.relative_to(directory)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                path.rename(target)
+        print(__import__('json').dumps({'state': 'update_deferred_for_maintenance',
+                                       'terminal': str(executable)}), flush=True)
 
 
 @contextmanager

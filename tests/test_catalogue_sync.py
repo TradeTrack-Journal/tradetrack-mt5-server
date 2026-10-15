@@ -102,6 +102,7 @@ class CatalogueSyncTests(unittest.TestCase):
             {'id': 'demo-02', 'quarantineIdentity': '12:34', 'generation': 'generation'}]}]
         with patch('app.collector.restart_budget.reserve_restart'), \
                 patch('app.collector.update_recovery.terminate_verified') as terminate, \
+                patch('app.collector.update_recovery.defer_staged_updates'), \
                 patch('app.collector.catalogue_sync.start_terminal', return_value=True):
             result = synchronize_once([self.source, self.target])
             terminate.assert_called_once_with(self.target.windows, Path(self.target.slot['executablePath']).resolve(), 12, '12:34')

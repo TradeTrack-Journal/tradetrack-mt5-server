@@ -28,7 +28,7 @@ class QuarantineRecoveryTests(unittest.TestCase):
         self.assertEqual(self.run_recovery('42:1', (42, '42:2')), ('replacement_pending_report', 0, 0))
 
     def test_missing_quarantined_terminal_is_launched(self):
-        self.assertEqual(self.run_recovery('42:1', (None, None)), ('restarted', 0, 1))
+        self.assertEqual(self.run_recovery('42:1', (None, None)), ('restarted', 1, 1))
 
     def test_busy_mutex_prevents_even_api_refresh(self):
         with patch('app.collector.quarantine_recovery.InventoryAgent') as agent, \

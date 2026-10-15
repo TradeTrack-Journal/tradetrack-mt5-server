@@ -45,8 +45,10 @@ class RecoveryTests(TestCase):
     def test_updater_wait_preserves_quarantine_recovery_intent(self):
         worker = self.worker(None)
         worker.windows.find_process.return_value = (None, None)
-        with patch('app.collector.server_preparation.start_terminal', return_value=False):
+        with patch('app.collector.server_preparation.start_terminal', return_value=False), \
+                patch('app.collector.server_preparation.stop_fenced_terminal') as stop:
             self.assertEqual(worker.prepare_inventory()['state'], 'update_pending')
+            stop.assert_called_once()
         self.assertEqual(worker.restart_identity, 'old')
 
     def test_quarantine_recovery_survives_worker_restart(self):

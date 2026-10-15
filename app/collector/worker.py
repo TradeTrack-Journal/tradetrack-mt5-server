@@ -109,7 +109,8 @@ class SlotWorker:
             from .server_preparation import stop_fenced_terminal, start_terminal
             with self.windows.inventory_lock(slot['executablePath']):
                 pid, identity = self.windows.find_process(slot['executablePath'])
-                if identity == self.restart_identity:
+                if not pid or identity == self.restart_identity:
+                    # Includes retry after a crash between stop and launch.
                     stop_fenced_terminal(self.windows, slot['executablePath'], self.restart_identity, self.inventory.client, slot['id'])
                     pid = None
                 if not pid:
