@@ -15,6 +15,8 @@ if ((Get-Item -LiteralPath $maintenanceRoot).Attributes -band [IO.FileAttributes
 $runRoot = Join-Path $maintenanceRoot ('runs\' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '-' + [Guid]::NewGuid().ToString('N'))
 $statusFile = Join-Path $maintenanceRoot 'status.json'
 $phase = 'preflight'
+$installerExitCode = $null
+$failureCode = 'STAGING_FAILED'
 function Write-Status([string]$state, [object]$detail) {
     $value = [ordered]@{ state=$state; at=[DateTime]::UtcNow.ToString('o'); phase=$script:phase; detail=$detail; productionChanges=$false }
     $temporary = Join-Path $maintenanceRoot 'status.pending.json'
@@ -116,9 +118,13 @@ public static class TradeTrackInstallerJob {
     foreach ($folder in @($env:APPDATA,$env:LOCALAPPDATA,$env:TEMP)) { New-Item -ItemType Directory -Path $folder -Force | Out-Null }
     $phase = 'install-candidate'
     Write-Status 'running' $null
-    $exitCode = [TradeTrackInstallerJob]::Run($setup,$terminalRoot,$runRoot)
-    if ($exitCode -ne 0) { throw 'Installer returned nonzero exit code.' }
+    $failureCode = 'INSTALLER_EXECUTION_FAILED'
+    $installerExitCode = [TradeTrackInstallerJob]::Run($setup,$terminalRoot,$runRoot)
+    # Record the vendor outcome even if validation below fails. Do not infer
+    # success from file presence or treat an undocumented exit code as success.
+    Write-Status 'running' ([ordered]@{ installerExitCode=$installerExitCode; runDirectory=$runRoot })
     $phase = 'verify-candidate'
+    $failureCode = 'CANDIDATE_VALIDATION_FAILED'
     $files = @()
     foreach ($name in @('terminal64.exe','MetaEditor64.exe','metatester64.exe')) {
         $path = Join-Path $terminalRoot $name
@@ -127,12 +133,17 @@ public static class TradeTrackInstallerJob {
         if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Unsafe candidate file.' }
         $files += [ordered]@{ name=$name; sha256=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash; version=$item.VersionInfo.FileVersion }
     }
-    $manifest = [ordered]@{ schemaVersion=1; createdAt=[DateTime]::UtcNow.ToString('o'); state='candidate_ready'; approvedForProduction=$false; directory=$terminalRoot; files=$files }
+    if (@($files.version | Select-Object -Unique).Count -ne 1) { throw 'Candidate versions differ.' }
+    $candidateState = if ($installerExitCode -eq 0) { 'candidate_ready' } else { 'candidate_requires_review' }
+    $manifest = [ordered]@{ schemaVersion=1; createdAt=[DateTime]::UtcNow.ToString('o'); state=$candidateState; installerExitCode=$installerExitCode; approvedForProduction=$false; directory=$terminalRoot; files=$files }
     $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $runRoot 'candidate.json') -Encoding UTF8
     $pending = Join-Path $maintenanceRoot 'latest-candidate.pending.json'
     $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $pending -Encoding UTF8
     Move-Item -LiteralPath $pending -Destination (Join-Path $maintenanceRoot 'latest-candidate.json') -Force
-    Write-Status 'candidate_ready' ([ordered]@{ directory=$terminalRoot; approvedForProduction=$false })
+    Write-Status $candidateState ([ordered]@{ directory=$terminalRoot; installerExitCode=$installerExitCode; approvedForProduction=$false })
+    # Keep the task failure signal for an unknown vendor outcome, but retain
+    # signed candidate evidence for review instead of hiding it behind one word.
+    if ($installerExitCode -ne 0) { exit 2 }
 } catch {
     # No raw exception/installer output or credentials are sent to external services.
     Write-Status 'failed' ([ordered]@{
@@ -140,6 +151,9 @@ public static class TradeTrackInstallerJob {
         exceptionType=$_.Exception.GetType().FullName
         hresult=$_.Exception.HResult
         runDirectory=$runRoot
+        failureCode=$failureCode
+        installerExitCode=$installerExitCode
+        scriptLine=$_.InvocationInfo.ScriptLineNumber
     })
     exit 1
 }

@@ -11,6 +11,22 @@ This supersedes the installer-preparation section of the October 14 readiness re
 
 Actual vendor installation under SYSTEM still requires the first elevated setup/run. Compilation and the process fixture do not establish installer success or build compatibility.
 
+### First SYSTEM run, 19:13–19:14 UTC
+
+The administrator installed the task and its protected helper successfully. The task downloaded and unpacked signed build **6266** into its isolated directory. All three executable signatures were valid. The original helper recorded `failed` at `install-candidate` with a RuntimeException; its code rejected a nonzero installer exit but failed to retain the numeric value. Therefore the exact original exit code and its meaning are not established, and this is not a successful compatibility validation.
+
+A subsequent standard-user installer probe exited 0 without creating its requested terminal folder; a user-reported password prompt coincided with that probe. The installer has an `asInvoker` manifest, but this does not rule out an explicit elevation request. Do not repeat standard-user vendor installer probes. No production terminal PID changed during this probe, and the live inventory showed 10 healthy slots at 19:14 UTC.
+
+The revised helper records the actual installer exit, failing phase and line. It verifies and records signed candidate files even on nonzero exit, labeling them `candidate_requires_review` with task exit 2 and `approvedForProduction: false`. It does not reinterpret undocumented nonzero exits as success. A further correction grants the worker read-only task inspection, without execute or modification rights; the original task's default ACL hid it from the standard user.
+
+After reviewing the revised package, update the installed helper from an administrator PowerShell:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "C:\TradeTrack\handoff\mt5-maintenance-20261015-r2\Install-MT5Maintenance.ps1" -Repair
+```
+
+Repair verifies the exact existing SYSTEM action, inactive task, protected owner/ACL and known helper hash, retains a backup, installs the newly pinned helper and starts one new isolated run. It does not change the Sunday schedule or production configuration. This elevated repair is necessary because the helper is deliberately not writable by the collector user.
+
 ## One-time setup
 
 Review `scripts/Install-MT5Maintenance.ps1` and `scripts/Stage-MT5Update.ps1`. Keep them together. The installer pins the helper's SHA-256 and verifies it again after copying it into the protected directory.
@@ -35,7 +51,7 @@ Get-Content 'C:\Program Files\TradeTrack MT5 Maintenance\status.json'
 Get-Content 'C:\Program Files\TradeTrack MT5 Maintenance\latest-candidate.json'
 ```
 
-Success requires `state: candidate_ready`, task result 0, and three signed executable hashes in the candidate manifest. `approvedForProduction` remains false. A failed download, signature, install, timeout or disk check leaves production terminal files untouched. `status.json` records the failing phase and exception type. A successful candidate is not evidence of collector compatibility.
+Success requires `state: candidate_ready`, task result 0, and three signed executable hashes with matching versions in the candidate manifest. `approvedForProduction` remains false. `candidate_requires_review` and task result 2 preserve a nonzero vendor outcome for investigation, even when all signed binaries are present. A failed download, signature, install, timeout or disk check leaves production terminal files untouched. `status.json` records the failing phase, exception type, installer exit when available, and source line. A successful candidate is not evidence of collector compatibility.
 
 ## Production rollout gate
 
