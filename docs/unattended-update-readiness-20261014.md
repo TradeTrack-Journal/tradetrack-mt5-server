@@ -1,5 +1,7 @@
 # Unattended MT5 update readiness — October 14, 2026
 
+Historical snapshot. See [October 15 setup and verification](unattended-update-setup-20261015.md) for the prepared protected staging task and the managed-restart fix. The healthy-slot count below describes October 14 only.
+
 ## Verified state
 
 At 11:03 UTC all ten production slots had fresh inventory, supported installed builds and no quarantine. demo-01 runs 6246; the other nine run 6231. Nine active staging folders contain package filenames ending in 6259. These filename hints do not establish package authenticity or collector compatibility. The October 14 demo-02 updater handoff recurred despite the October 13 fenced-stop fix.
