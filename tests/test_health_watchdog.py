@@ -14,8 +14,9 @@ class WatchdogTests(unittest.TestCase):
             config = Path(directory) / 'agent.json'
             (Path(directory) / 'worker.drain').touch()
             with patch('sys.argv', ['watch', '--config', str(config), '--log', str(Path(directory) / 'health.jsonl')]), \
-                    patch.object(watch_mt5_health, 'load_config', return_value={'slots': []}), \
+                    patch.object(watch_mt5_health, 'load_config', return_value={'slots': [], 'apiBaseUrl':'https://example.invalid','nodeId':'test'}), \
                     patch.object(watch_mt5_health, 'telemetry') as telemetry, \
+                    patch.object(watch_mt5_health, 'NodeClient'), \
                     patch.object(watch_mt5_health, 'InventoryAgent') as agent, \
                     patch.object(watch_mt5_health.time, 'sleep') as sleep:
                 watch_mt5_health.main()
@@ -35,10 +36,11 @@ class WatchdogTests(unittest.TestCase):
     def test_diagnostic_inventory_failure_does_not_block_fenced_recovery(self):
         with TemporaryDirectory() as directory:
             log = Path(directory) / 'health.jsonl'
-            config = {'slots': [{'id': 'one'}]}
+            config = {'slots': [{'id': 'one'}], 'apiBaseUrl':'https://example.invalid','nodeId':'test'}
             with patch('sys.argv', ['watch', '--config', 'config.json', '--log', str(log), '--once']), \
                     patch.object(watch_mt5_health, 'load_config', return_value=config), \
                     patch.object(watch_mt5_health, 'telemetry'), \
+                    patch.object(watch_mt5_health, 'NodeClient'), \
                     patch.object(watch_mt5_health, 'InventoryAgent') as agent, \
                     patch.object(watch_mt5_health, 'recover_quarantined', return_value='restarted') as recover:
                 agent.return_value.remote_slots = {'one': {'quarantineIdentity': 'old-process'}}

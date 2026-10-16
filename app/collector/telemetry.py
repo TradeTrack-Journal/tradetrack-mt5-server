@@ -13,6 +13,7 @@ _seen = {}
 _pending = {}
 _lock = threading.Lock()
 _state_path = None
+_relay = False
 REMINDER_SECONDS = 6 * 3600
 TRANSIENT_SECONDS = 180
 LOCAL_ONLY = {'SLOT_BUSY', 'SERVER_PREPARING', 'RECOVERY_COOLDOWN', 'AUTH_FAILED', 'INVALID_PASSWORD',
@@ -77,9 +78,20 @@ def sanitize(event, hint):
     }
 
 
-def initialize(state_path=None):
-    global _sdk, _state_path
+def initialize(state_path=None, client=None):
+    global _sdk, _state_path, _relay
     _state_path = Path(state_path) if state_path else None
+    if client is not None and _state_path is not None:
+        try:
+            from .telemetry_outbox import DiagnosticOutbox
+            release = Path(__file__).resolve().parents[2].name.removeprefix('mt5-')
+            if not re.fullmatch(r'[a-f0-9]{7,40}', release):
+                release = None
+            _sdk = DiagnosticOutbox(_state_path, client, release)
+            _relay = True
+        except Exception:
+            print('{"errorCode":"TELEMETRY_INIT_FAILED"}', flush=True)
+        return
     if not os.environ.get('MT5_SENTRY_DSN'):
         return
     try:
@@ -113,7 +125,7 @@ def report(result):
             code = 'WORKER_FAILED'
         if code in LOCAL_ONLY:
             return
-        details = api_fields(result.get('operation'), result.get('apiReason'))
+        details = api_fields(result.get('operation') or result.get('nativeOperation'), result.get('apiReason'))
         reason = details.get('apiReason')
         critical = reason in CRITICAL_API_REASONS
         key = (code, slot)
@@ -128,9 +140,10 @@ def report(result):
                 _pending[key] = (first, now, count + 1)
                 if count + 1 < 3 or now - first < TRANSIENT_SECONDS:
                     return
-            if not reserve_event(code + ':' + reason if critical else code, time.time()):
+            if not _relay and not reserve_event(code + ':' + reason if critical else code, time.time()):
                 return
         return _sdk.capture_event({'tags': {'error_code': code, 'slot': slot,
+                                          'native_error_code': result.get('nativeErrorCode'),
                                           'operation': details.get('operation'), 'api_reason': details.get('apiReason')}})
     except Exception:
         return None

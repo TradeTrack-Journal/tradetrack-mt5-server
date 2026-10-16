@@ -57,14 +57,14 @@ def main():
     if args.child:
         child()
         return
-    telemetry.initialize(Path(args.config).resolve().parent / 'telemetry-state.sqlite3' if args.config else None)
-    from app.collector.node_agent import load_config
+    from app.collector.node_agent import load_config, NodeClient
     from app.collector.worker import SlotWorker
     if not args.config:
         parser.error("--config is required")
     config = load_config(args.config)
     _log_directory = Path(args.config).resolve().parent
     token = os.environ.pop("MT5_AGENT_TOKEN", "")
+    telemetry.initialize(_log_directory / 'telemetry-state.sqlite3', NodeClient(config['apiBaseUrl'], config['nodeId'], token))
 
     from app.collector.scheduler import run_slots
     from app.collector.server_preparation import ServerPreparation

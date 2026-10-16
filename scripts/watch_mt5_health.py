@@ -7,7 +7,7 @@ from pathlib import Path
 import time
 
 from app.collector import telemetry
-from app.collector.node_agent import AgentError, InventoryAgent, load_config
+from app.collector.node_agent import AgentError, InventoryAgent, NodeClient, load_config
 from app.collector.quarantine_recovery import recover_quarantined
 from app.collector.scheduler import error_code
 from app.collector.diagnostics import error_fields
@@ -23,7 +23,7 @@ def main():
     args = parser.parse_args()
     config = load_config(args.config)
     token = os.environ.pop('MT5_AGENT_TOKEN', '')
-    telemetry.initialize(Path(args.config).resolve().parent / 'telemetry-state.sqlite3')
+    telemetry.initialize(Path(args.config).resolve().parent / 'telemetry-state.sqlite3', NodeClient(config['apiBaseUrl'], config['nodeId'], token))
     retry_at = {}
     ui_budget = UiRecoveryBudget(Path(args.config).resolve().parent / 'ui-recovery-budget.json')
 
