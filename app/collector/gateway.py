@@ -75,9 +75,13 @@ def investor_evidence(data_path, baseline, login):
     return any(line.split("\t")[-1].strip() == expected for line in fresh_journal_lines(data_path, baseline))
 
 
-def login_failure(native, data_path, baseline, login, server, *, settle_seconds=10, diagnostics=None):
+def login_failure(native, data_path, baseline, login, server, *, settle_seconds=10, diagnostics=None, detach=False):
     # Capture immediately: later native calls could overwrite the failure code.
     code = connection_error(native, diagnostics)
+    if detach:
+        # Release the failed IPC session before waiting for its journal to settle.
+        # Preserve last_error above: shutdown may replace it. No login is retried here.
+        native.shutdown()
     if code not in ('AUTH_FAILED', 'CONNECTION_FAILED'):
         return code
     # Both -6 and generic failures are ambiguous. Broker transport evidence must
@@ -106,7 +110,11 @@ def login_failure(native, data_path, baseline, login, server, *, settle_seconds=
                 if (source == 'Network' and
                         message.startswith(f"'{login}': authorization on {server} failed (") and message.endswith(')') and
                         message not in (common_message, unavailable_message)):
-                    return code  # Explicit rejection takes precedence over transport evidence.
+                    # A generic native return must not hide an explicit broker rejection.
+                    # Unknown/localized reasons remain ambiguous; never infer suspension.
+                    if message == f"'{login}': authorization on {server} failed (Invalid account)":
+                        return 'AUTH_FAILED'
+                    return 'CONNECTION_FAILED'
                 common_error |= source == 'Network' and message == common_message
                 service_unavailable |= source == 'Network' and message == unavailable_message
         except CollectionError:
@@ -171,11 +179,11 @@ def collect(request, native=None, windows=None):
         if not native.initialize(executable, login=int(login), password=credentials["investorPassword"], server=server,
                                  portable=Path(data_path).resolve() == Path(executable).parent.resolve(), timeout=20000):
             details = {}
-            code = login_failure(native, data_path, baseline, login, server, diagnostics=details)
+            code = login_failure(native, data_path, baseline, login, server, diagnostics=details, detach=True)
             raise CollectionError(code, operation='initialize', native_code=details.get('nativeErrorCode'))
         if not native.login(int(login), password=credentials["investorPassword"], server=server, timeout=20000):
             details = {}
-            code = login_failure(native, data_path, baseline, login, server, diagnostics=details)
+            code = login_failure(native, data_path, baseline, login, server, diagnostics=details, detach=True)
             raise CollectionError(code, operation='login', native_code=details.get('nativeErrorCode'))
         credentials.pop("investorPassword", None)
         # Native login can complete before the Windows caption is repainted.

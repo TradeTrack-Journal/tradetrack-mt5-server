@@ -33,6 +33,28 @@ class LoginFailureTests(unittest.TestCase):
         with patch('app.collector.gateway.fresh_journal_lines', return_value=[unavailable, rejected]):
             native = Mock(last_error=Mock(return_value=(-1, 'private')))
             self.assertEqual(login_failure(native, '.', {}, '12345', 'Example-Real', settle_seconds=0),
+                             'AUTH_FAILED')
+
+    def test_shutdown_flush_is_classified_using_original_error(self):
+        line = "CN\t2\ttime\tNetwork\t'12345': authorization on Example-Real failed (Service is not available)"
+        lines = []
+        native = Mock(last_error=Mock(side_effect=[(-6, 'private'), (1, 'success')]))
+        native.shutdown.side_effect = lambda: lines.append(line)
+        details = {}
+        with patch('app.collector.gateway.fresh_journal_lines', side_effect=lambda *_: iter(lines)):
+            self.assertEqual(login_failure(native, '.', {}, '12345', 'Example-Real',
+                                           settle_seconds=0, detach=True, diagnostics=details),
+                             'NETWORK_UNAVAILABLE')
+        self.assertEqual(details, {'nativeErrorCode': -6})
+        native.last_error.assert_called_once()
+        native.shutdown.assert_called_once()
+        native.login.assert_not_called()
+
+    def test_unknown_broker_reason_does_not_claim_auth_or_suspension(self):
+        line = "CN\t2\ttime\tNetwork\t'12345': authorization on Example-Real failed (Unknown reason)"
+        native = Mock(last_error=Mock(return_value=(-6, 'private')))
+        with patch('app.collector.gateway.fresh_journal_lines', return_value=[line]):
+            self.assertEqual(login_failure(native, '.', {}, '12345', 'Example-Real', settle_seconds=0),
                              'CONNECTION_FAILED')
 
     def test_ipc_failure_retains_process_recovery_without_reading_journal(self):
