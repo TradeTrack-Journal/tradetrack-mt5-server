@@ -75,7 +75,7 @@ def investor_evidence(data_path, baseline, login):
     return any(line.split("\t")[-1].strip() == expected for line in fresh_journal_lines(data_path, baseline))
 
 
-def login_failure(native, data_path, baseline, login, server, *, settle_seconds=10, diagnostics=None, detach=False):
+def login_failure(native, data_path, baseline, login, server, *, settle_seconds=60, diagnostics=None, detach=False):
     # Capture immediately: later native calls could overwrite the failure code.
     code = connection_error(native, diagnostics)
     if detach:
@@ -93,6 +93,7 @@ def login_failure(native, data_path, baseline, login, server, *, settle_seconds=
     # MT5 also uses -6 during access-point/server switching. Require exact,
     # fresh transport evidence, or an explicit service-unavailable response.
     # This merely requests a later retry: identity and access gates stay intact.
+    # Production MT5 buffered a rejection for 21 seconds after its journal timestamp.
     # Journal writes can lag the failed native call. Wait boundedly for the
     # original snapshot's evidence; never retry login or read account history here.
     deadline = time.monotonic() + settle_seconds
@@ -127,7 +128,7 @@ def login_failure(native, data_path, baseline, login, server, *, settle_seconds=
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return 'CONNECTION_FAILED'
-        time.sleep(min(0.1, remaining))
+        time.sleep(min(0.25, remaining))
 
 
 def collect(request, native=None, windows=None):

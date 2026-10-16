@@ -90,6 +90,14 @@ class LoginFailureTests(unittest.TestCase):
                 patch('app.collector.gateway.time.sleep'):
             self.assertEqual(login_failure(native, '.', {}, '12345', 'Example-Real'), 'NETWORK_UNAVAILABLE')
 
+    def test_production_buffered_rejection_after_twenty_seconds_is_recognized(self):
+        native = Mock(last_error=Mock(return_value=(-6, 'private')))
+        line = "CN\t2\ttime\tNetwork\t'12345': authorization on Example-Real failed (Invalid account)"
+        with patch('app.collector.gateway.fresh_journal_lines', side_effect=[[], [], [line]]), \
+                patch('app.collector.gateway.time.monotonic', side_effect=[0, 1, 21]), \
+                patch('app.collector.gateway.time.sleep'):
+            self.assertEqual(login_failure(native, '.', {}, '12345', 'Example-Real'), 'AUTH_FAILED')
+
     def test_temporary_journal_read_error_is_retried_without_repeating_login(self):
         native = Mock(last_error=Mock(return_value=(-6, 'private')))
         line = "CN\t2\ttime\tNetwork\t'12345': authorization on Example-Real failed (Service is not available)"
@@ -190,8 +198,8 @@ class LoginFailureTests(unittest.TestCase):
         with patch('app.collector.gateway.fresh_journal_lines', return_value=[]), \
                 patch('app.collector.gateway.time.monotonic', side_effect=[10, 11, 20]), \
                 patch('app.collector.gateway.time.sleep') as sleep:
-            self.assertEqual(login_failure(native, '.', {}, '12345', 'Example-Real'), 'CONNECTION_FAILED')
-        sleep.assert_called_once_with(0.1)
+            self.assertEqual(login_failure(native, '.', {}, '12345', 'Example-Real', settle_seconds=10), 'CONNECTION_FAILED')
+        sleep.assert_called_once_with(0.25)
         native.last_error.assert_called_once()
 
     def test_explicit_rejection_overrides_matching_transport_pair(self):
