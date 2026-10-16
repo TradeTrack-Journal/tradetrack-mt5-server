@@ -9,6 +9,20 @@ from scripts import watch_mt5_health
 
 
 class WatchdogTests(unittest.TestCase):
+    def test_drain_exits_continuous_watchdog_without_recovery_or_sleep(self):
+        with TemporaryDirectory() as directory:
+            config = Path(directory) / 'agent.json'
+            (Path(directory) / 'worker.drain').touch()
+            with patch('sys.argv', ['watch', '--config', str(config), '--log', str(Path(directory) / 'health.jsonl')]), \
+                    patch.object(watch_mt5_health, 'load_config', return_value={'slots': []}), \
+                    patch.object(watch_mt5_health, 'telemetry') as telemetry, \
+                    patch.object(watch_mt5_health, 'InventoryAgent') as agent, \
+                    patch.object(watch_mt5_health.time, 'sleep') as sleep:
+                watch_mt5_health.main()
+                agent.assert_not_called()
+                sleep.assert_not_called()
+                telemetry.flush.assert_called_once()
+
     def test_orphaned_python_process_prevents_duplicate_watchdog(self):
         with patch('sys.argv', ['watch', '--config', 'config.json']), \
                 patch.object(watch_mt5_health, 'WindowsTerminal') as native, \

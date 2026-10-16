@@ -36,10 +36,10 @@ def main():
 
     while True:
         if (Path(args.config).resolve().parent / 'worker.drain').exists():
-            if args.once:
-                break
-            time.sleep(5)
-            continue
+            # Release the single-instance mutex during a planned rollout. The
+            # supervisor waits on the same drain file before launching again.
+            # Sleeping here can orphan the watchdog when its parent task stops.
+            break
         try:
             # A pool expansion must not leave the watchdog comparing against
             # its old slot list forever. Validate the complete file on each pass.
