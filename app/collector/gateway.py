@@ -123,12 +123,54 @@ def login_failure(native, data_path, baseline, login, server, *, settle_seconds=
         except (OSError, UnicodeError):
             # A sharing violation or partial write may settle within this wait.
             sync_failed = common_error = service_unavailable = False
-        if service_unavailable or (sync_failed and common_error):
+        if service_unavailable:
+            return 'BROKER_SERVICE_UNAVAILABLE'
+        if sync_failed and common_error:
             return 'NETWORK_UNAVAILABLE'
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return 'CONNECTION_FAILED'
         time.sleep(min(0.25, remaining))
+
+
+def read_with_recovery(read, identity, *, budget_seconds=5, max_attempts=3):
+    """Retry a complete snapshot only after a verified reconnect, within one lease.
+
+    Never log in again here. Discard every partial read. Identity/access failures
+    propagate immediately, even during reconnect. The parent child deadline is
+    still authoritative if a native call itself blocks.
+    """
+    deadline = None
+    for attempt in range(max_attempts):
+        try:
+            return read()
+        except (CollectionError, DataError) as error:
+            code = error.code if isinstance(error, DataError) else str(error)
+            if code in ('HISTORY_UNAVAILABLE', 'POSITIONS_UNAVAILABLE'):
+                try:
+                    identity()
+                except CollectionError as check:
+                    if str(check) != 'NETWORK_UNAVAILABLE':
+                        raise
+                else:
+                    raise error  # No confirmed disconnect: preserve the original failure.
+            elif code != 'NETWORK_UNAVAILABLE':
+                raise
+            if deadline is None:
+                deadline = time.monotonic() + budget_seconds
+            if attempt + 1 >= max_attempts:
+                raise CollectionError('NETWORK_UNAVAILABLE') from None
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise CollectionError('NETWORK_UNAVAILABLE') from None
+                time.sleep(min(0.25, remaining))
+                try:
+                    identity()
+                    break
+                except CollectionError as check:
+                    if str(check) != 'NETWORK_UNAVAILABLE':
+                        raise
 
 
 def collect(request, native=None, windows=None):
@@ -187,91 +229,94 @@ def collect(request, native=None, windows=None):
             code = login_failure(native, data_path, baseline, login, server, diagnostics=details, detach=True)
             raise CollectionError(code, operation='login', native_code=details.get('nativeErrorCode'))
         credentials.pop("investorPassword", None)
-        # Native login can complete before the Windows caption is repainted.
-        # Only the initial caption may settle; every retry rechecks account,
-        # paths, process identity and both trading restrictions. Reads stay gated.
-        # Busy terminals can repaint later than the successful native login.
-        # Keep every identity/access check active and read no history while waiting.
-        caption_deadline = time.monotonic() + 10
-        while True:
-            try:
-                identity()
-                break
-            except CollectionError as error:
-                if str(error) != "INVESTOR_UNVERIFIED" or time.monotonic() >= caption_deadline:
-                    raise
-                time.sleep(0.05)
-        plan = plan_recent_history(datetime.now(timezone.utc))
-        before_ms = credentials.get("historyBeforeMs")
-        window = plan_history_before(before_ms) if before_ms is not None else plan.native_window
-        count_verified = callable(getattr(native, "history_deals_total", None))
-        adaptive_recent = credentials.get("adaptiveRecentHistory") is True and count_verified and before_ms is None
-        recent_before = credentials.get("recentBeforeMs")
-        if recent_before is not None:
-            floor = credentials.get("recentWindowFloorMs")
-            if not adaptive_recent or type(floor) is not int or type(recent_before) is not int:
-                raise CollectionError("INVALID_NATIVE_DATA")
-            window = HistoryWindow(datetime.fromtimestamp(floor / 1000, timezone.utc),
-                                   datetime.fromtimestamp(recent_before / 1000, timezone.utc))
-        recent_floor = window.start_ms
-
-        def count(bounds):
-            value = native.history_deals_total(*bounds)
-            if type(value) is not int or value < 0:
-                raise CollectionError("HISTORY_UNAVAILABLE")
-            return value
-
-        if count_verified and (before_ms is not None or adaptive_recent):
-            # Shrink dense historical windows; retain the fixed upper cursor so nothing is skipped.
-            for _ in range(32):
-                if count(window.mt5_bounds()) <= 4000:
+        def read_snapshot():
+            # Native login can complete before the Windows caption is repainted.
+            # Only the initial caption may settle; every retry rechecks account,
+            # paths, process identity and both trading restrictions. Reads stay gated.
+            # Busy terminals can repaint later than the successful native login.
+            # Keep every identity/access check active and read no history while waiting.
+            caption_deadline = time.monotonic() + 10
+            while True:
+                try:
+                    identity()
                     break
-                if window.end_ms - window.start_ms <= 1000:
+                except CollectionError as error:
+                    if str(error) != "INVESTOR_UNVERIFIED" or time.monotonic() >= caption_deadline:
+                        raise
+                    time.sleep(0.05)
+            plan = plan_recent_history(datetime.now(timezone.utc))
+            before_ms = credentials.get("historyBeforeMs")
+            window = plan_history_before(before_ms) if before_ms is not None else plan.native_window
+            count_verified = callable(getattr(native, "history_deals_total", None))
+            adaptive_recent = credentials.get("adaptiveRecentHistory") is True and count_verified and before_ms is None
+            recent_before = credentials.get("recentBeforeMs")
+            if recent_before is not None:
+                floor = credentials.get("recentWindowFloorMs")
+                if not adaptive_recent or type(floor) is not int or type(recent_before) is not int:
+                    raise CollectionError("INVALID_NATIVE_DATA")
+                window = HistoryWindow(datetime.fromtimestamp(floor / 1000, timezone.utc),
+                                       datetime.fromtimestamp(recent_before / 1000, timezone.utc))
+            recent_floor = window.start_ms
+
+            def count(bounds):
+                value = native.history_deals_total(*bounds)
+                if type(value) is not int or value < 0:
+                    raise CollectionError("HISTORY_UNAVAILABLE")
+                return value
+
+            if count_verified and (before_ms is not None or adaptive_recent):
+                # Shrink dense historical windows; retain the fixed upper cursor so nothing is skipped.
+                for _ in range(32):
+                    if count(window.mt5_bounds()) <= 4000:
+                        break
+                    if window.end_ms - window.start_ms <= 1000:
+                        raise CollectionError("BATCH_TOO_LARGE")
+                    midpoint_ms = (window.start_ms + window.end_ms) // 2000 * 1000
+                    window = HistoryWindow(datetime.fromtimestamp(midpoint_ms / 1000, timezone.utc), window.end)
+                else:
                     raise CollectionError("BATCH_TOO_LARGE")
-                midpoint_ms = (window.start_ms + window.end_ms) // 2000 * 1000
-                window = HistoryWindow(datetime.fromtimestamp(midpoint_ms / 1000, timezone.utc), window.end)
-            else:
+            # A warm-up read does not prove completeness; store only the final successful sample.
+            first = native.history_deals_get(*window.mt5_bounds())
+            if first is None:
+                raise CollectionError("HISTORY_UNAVAILABLE")
+            initial_deals = normalize_deals(first, window, max_records=5000)
+            clock_symbols = {deal.symbol for deal in initial_deals if deal.symbol}
+            clock_first = clock_sample(native, clock_symbols)
+            identity()
+            time.sleep(1)
+            clock_second = clock_sample(native, clock_symbols)
+            identity()
+            expected = count(window.mt5_bounds()) if count_verified else None
+            final = native.history_deals_get(*window.mt5_bounds())
+            deals = normalize_deals(final, window, max_records=5000)
+            if count_verified and (len(final) != expected or count(window.mt5_bounds()) != expected):
+                raise CollectionError("HISTORY_UNAVAILABLE")
+            older_empty = False
+            if count_verified:
+                # Conservative inclusive native endpoint: a boundary deal can delay completion, never skip it.
+                older_bounds = (EPOCH, window.start.replace(microsecond=0))
+                older_empty = count(older_bounds) == 0 and count(older_bounds) == 0
+            identity()
+            positions = normalize_positions(native.positions_get(), max_records=5000)
+            account_info = identity()
+            account = normalize_account({"balance": account_info.balance, "equity": account_info.equity, "currency": account_info.currency})
+            if len(deals) + len(positions) > 5000:
                 raise CollectionError("BATCH_TOO_LARGE")
-        # A warm-up read does not prove completeness; store only the final successful sample.
-        first = native.history_deals_get(*window.mt5_bounds())
-        if first is None:
-            raise CollectionError("HISTORY_UNAVAILABLE")
-        initial_deals = normalize_deals(first, window, max_records=5000)
-        clock_symbols = {deal.symbol for deal in initial_deals if deal.symbol}
-        clock_first = clock_sample(native, clock_symbols)
-        identity()
-        time.sleep(1)
-        clock_second = clock_sample(native, clock_symbols)
-        identity()
-        record_clock(server, clock_first, clock_second)
-        expected = count(window.mt5_bounds()) if count_verified else None
-        final = native.history_deals_get(*window.mt5_bounds())
-        deals = normalize_deals(final, window, max_records=5000)
-        if count_verified and (len(final) != expected or count(window.mt5_bounds()) != expected):
-            raise CollectionError("HISTORY_UNAVAILABLE")
-        older_empty = False
-        if count_verified:
-            # Conservative inclusive native endpoint: a boundary deal can delay completion, never skip it.
-            older_bounds = (EPOCH, window.start.replace(microsecond=0))
-            older_empty = count(older_bounds) == 0 and count(older_bounds) == 0
-        identity()
-        positions = normalize_positions(native.positions_get(), max_records=5000)
-        account_info = identity()
-        account = normalize_account({"balance": account_info.balance, "equity": account_info.equity, "currency": account_info.currency})
-        if len(deals) + len(positions) > 5000:
-            raise CollectionError("BATCH_TOO_LARGE")
-        return {"schemaVersion": 1, "login": login, "serverName": server,
-                "observedAt": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
-                "timestampBasis": "broker_reported_unresolved", "historyCompletenessVerified": False,
-                "investorVerified": not consented and not trading_mode, "pythonTradingDisabled": True,
-                "investorVerificationMethod": "trading_password_consent" if consented else "terminal_title_read_only", "terminalBuild": verified_build,
-                "account": asdict(account),
-                "windowStartMs": window.start_ms, "windowEndMs": window.end_ms,
-                **({"rangeCountVerified": True, "olderHistoryEmpty": older_empty} if count_verified else {}),
-                **({"backfillBeforeMs": before_ms} if before_ms is not None else {}),
-                **({"recentWindowFloorMs": recent_floor} if adaptive_recent else {}),
-                **({"recentBeforeMs": recent_before} if recent_before is not None else {}),
-                "deals": [asdict(item) for item in deals], "positions": [asdict(item) for item in positions]}
+            record_clock(server, clock_first, clock_second)
+            return {"schemaVersion": 1, "login": login, "serverName": server,
+                    "observedAt": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                    "timestampBasis": "broker_reported_unresolved", "historyCompletenessVerified": False,
+                    "investorVerified": not consented and not trading_mode, "pythonTradingDisabled": True,
+                    "investorVerificationMethod": "trading_password_consent" if consented else "terminal_title_read_only", "terminalBuild": verified_build,
+                    "account": asdict(account),
+                    "windowStartMs": window.start_ms, "windowEndMs": window.end_ms,
+                    **({"rangeCountVerified": True, "olderHistoryEmpty": older_empty} if count_verified else {}),
+                    **({"backfillBeforeMs": before_ms} if before_ms is not None else {}),
+                    **({"recentWindowFloorMs": recent_floor} if adaptive_recent else {}),
+                    **({"recentBeforeMs": recent_before} if recent_before is not None else {}),
+                    "deals": [asdict(item) for item in deals], "positions": [asdict(item) for item in positions]}
+
+        return read_with_recovery(read_snapshot, identity)
     except DataError as exc:
         code = exc.code if exc.code in ("HISTORY_UNAVAILABLE", "POSITIONS_UNAVAILABLE", "BATCH_TOO_LARGE") else "INVALID_NATIVE_DATA"
         raise CollectionError(code) from None

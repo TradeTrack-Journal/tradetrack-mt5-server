@@ -42,6 +42,7 @@ EXPLANATIONS = {
     'TERMINAL_UI_BUSY': 'Another visible MT5 dialog prevented safe terminal maintenance.',
     'TERMINAL_STOP_TIMEOUT': 'The exact terminal process did not exit after a graceful close request.',
     'AUTH_FAILED': 'MT5 reported authentication failure; check the exact server, credentials and broker account status.',
+    'BROKER_SERVICE_UNAVAILABLE': 'MT5 reported service unavailable for the exact requested account and server. This does not prove suspension.',
     'NETWORK_UNAVAILABLE': 'The MT5 connection failed with recognized transport or service-unavailable evidence.',
     'CONNECTION_FAILED': 'MT5 connection failed without enough evidence to distinguish credentials, broker restrictions or transport.',
     'IDENTITY_DRIFT': 'The terminal account identity did not match the requested account; collection was stopped.',

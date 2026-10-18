@@ -193,9 +193,67 @@ class GatewayTests(unittest.TestCase):
 
     def test_disconnected_verified_identity_is_network_failure(self):
         self.native.terminal_info.return_value.connected = False
+        with patch('app.collector.gateway.time.monotonic', side_effect=[0, 0, 6]), \
+                self.assertRaisesRegex(CollectionError, '^NETWORK_UNAVAILABLE$'):
+            collect(self.request, self.native, self.windows)
+        self.native.history_deals_get.assert_not_called()
+
+    def test_initial_flap_recovers_without_repeating_login(self):
+        connected = self.native.terminal_info.return_value
+        offline = SimpleNamespace(**{**vars(connected), 'connected': False})
+        self.native.terminal_info.side_effect = [offline, offline] + [connected] * 10
+        result = collect(self.request, self.native, self.windows)
+        self.assertTrue(result['investorVerified'])
+        self.native.login.assert_called_once()
+        self.native.initialize.assert_called_once()
+        self.assertNotIn('investorPassword', self.request['credentials'])
+
+    def test_flap_after_final_history_discards_snapshot_and_rereads(self):
+        connected = self.native.terminal_info.return_value
+        offline = SimpleNamespace(**{**vars(connected), 'connected': False})
+        # Initial gate, warmup, clock, final history gate (disconnect), recovery.
+        self.native.terminal_info.side_effect = [connected] * 3 + [offline] + [connected] * 10
+        self.native.history_deals_get.side_effect = [(), (), (), ()]
+        with patch('app.collector.gateway.record_clock') as clock:
+            result = collect(self.request, self.native, self.windows)
+        self.assertTrue(result['rangeCountVerified'])
+        self.assertEqual(self.native.history_deals_get.call_count, 4)
+        self.assertEqual(self.native.history_deals_total.call_count, 8)
+        self.native.positions_get.assert_called_once()
+        clock.assert_called_once()  # Failed sample does not contaminate clock evidence.
+        self.native.login.assert_called_once()
+
+    def test_failed_history_during_disconnect_is_reread(self):
+        connected = self.native.terminal_info.return_value
+        offline = SimpleNamespace(**{**vars(connected), 'connected': False})
+        self.native.terminal_info.side_effect = [connected, offline] + [connected] * 10
+        self.native.history_deals_get.side_effect = [None, (), ()]
+        self.assertEqual(collect(self.request, self.native, self.windows)['deals'], [])
+        self.assertEqual(self.native.history_deals_get.call_count, 3)
+
+    def test_reconnect_cannot_accept_changed_identity_or_permissions(self):
+        connected = self.native.terminal_info.return_value
+        offline = SimpleNamespace(**{**vars(connected), 'connected': False})
+        for change, code in [({'login': 999}, 'IDENTITY_DRIFT'),
+                             ({'server': 'Other'}, 'IDENTITY_DRIFT'),
+                             ({'trade_allowed': True}, 'TRADING_ENABLED')]:
+            with self.subTest(change=change):
+                self.request['credentials']['investorPassword'] = 'test-only'
+                original = self.native.account_info.return_value
+                self.native.account_info.side_effect = [original, SimpleNamespace(**{**vars(original), **change})]
+                self.native.terminal_info.side_effect = [offline, connected]
+                with self.assertRaisesRegex(CollectionError, code):
+                    collect(self.request, self.native, self.windows)
+        self.native.history_deals_get.assert_not_called()
+
+    def test_repeated_flapping_has_an_attempt_limit(self):
+        connected = self.native.terminal_info.return_value
+        offline = SimpleNamespace(**{**vars(connected), 'connected': False})
+        self.native.terminal_info.side_effect = [offline, connected, offline, connected, offline]
         with self.assertRaisesRegex(CollectionError, '^NETWORK_UNAVAILABLE$'):
             collect(self.request, self.native, self.windows)
         self.native.history_deals_get.assert_not_called()
+        self.native.login.assert_called_once()
 
     def test_pid_reuse_prevents_initialize(self):
         self.windows.process_identity.return_value = '12:99'

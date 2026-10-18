@@ -14,7 +14,7 @@ class LoginFailureTests(unittest.TestCase):
                     patch('app.collector.gateway.fresh_journal_lines', return_value=[line]):
                 native = Mock(last_error=Mock(return_value=(native_code, 'private')))
                 self.assertEqual(login_failure(native, '.', {}, '12345', 'Example-Real', settle_seconds=0),
-                                 'NETWORK_UNAVAILABLE')
+                                 'BROKER_SERVICE_UNAVAILABLE')
                 native.last_error.assert_called_once()
                 native.login.assert_not_called()
                 native.history_deals_get.assert_not_called()
@@ -44,7 +44,7 @@ class LoginFailureTests(unittest.TestCase):
         with patch('app.collector.gateway.fresh_journal_lines', side_effect=lambda *_: iter(lines)):
             self.assertEqual(login_failure(native, '.', {}, '12345', 'Example-Real',
                                            settle_seconds=0, detach=True, diagnostics=details),
-                             'NETWORK_UNAVAILABLE')
+                             'BROKER_SERVICE_UNAVAILABLE')
         self.assertEqual(details, {'nativeErrorCode': -6})
         native.last_error.assert_called_once()
         native.shutdown.assert_called_once()
@@ -77,7 +77,7 @@ class LoginFailureTests(unittest.TestCase):
                     with path.open('ab') as out:
                         out.write(record[split:])
                 with patch('app.collector.gateway.time.sleep', side_effect=finish) as sleep:
-                    self.assertEqual(login_failure(native, root, baseline, '12345', 'Example-Real'), 'NETWORK_UNAVAILABLE')
+                    self.assertEqual(login_failure(native, root, baseline, '12345', 'Example-Real'), 'BROKER_SERVICE_UNAVAILABLE')
                 sleep.assert_called_once()
                 native.login.assert_not_called()
                 native.history_deals_get.assert_not_called()
@@ -88,7 +88,7 @@ class LoginFailureTests(unittest.TestCase):
         with patch('app.collector.gateway.fresh_journal_lines', side_effect=[[], [], [line]]), \
                 patch('app.collector.gateway.time.monotonic', side_effect=[0, 1, 5]), \
                 patch('app.collector.gateway.time.sleep'):
-            self.assertEqual(login_failure(native, '.', {}, '12345', 'Example-Real'), 'NETWORK_UNAVAILABLE')
+            self.assertEqual(login_failure(native, '.', {}, '12345', 'Example-Real'), 'BROKER_SERVICE_UNAVAILABLE')
 
     def test_production_buffered_rejection_after_twenty_seconds_is_recognized(self):
         native = Mock(last_error=Mock(return_value=(-6, 'private')))
@@ -103,7 +103,7 @@ class LoginFailureTests(unittest.TestCase):
         line = "CN\t2\ttime\tNetwork\t'12345': authorization on Example-Real failed (Service is not available)"
         with patch('app.collector.gateway.fresh_journal_lines', side_effect=[PermissionError(), [line]]), \
                 patch('app.collector.gateway.time.sleep') as sleep:
-            self.assertEqual(login_failure(native, '.', {}, '12345', 'Example-Real'), 'NETWORK_UNAVAILABLE')
+            self.assertEqual(login_failure(native, '.', {}, '12345', 'Example-Real'), 'BROKER_SERVICE_UNAVAILABLE')
             sleep.assert_called_once()
             native.last_error.assert_called_once()
             native.login.assert_not_called()
@@ -154,7 +154,7 @@ class LoginFailureTests(unittest.TestCase):
             self.assertEqual(classify(), 'CONNECTION_FAILED')
             with path.open('ab') as out:
                 out.write(line.encode('utf-16-le'))
-            self.assertEqual(classify(), 'NETWORK_UNAVAILABLE')
+            self.assertEqual(classify(), 'BROKER_SERVICE_UNAVAILABLE')
             self.assertEqual(classify(login='54321'), 'CONNECTION_FAILED')
             self.assertEqual(classify(server='Other-Real'), 'CONNECTION_FAILED')
 
