@@ -120,10 +120,29 @@ class TelemetryTests(unittest.TestCase):
     def test_repeats_and_untrusted_fields(self):
         sdk = Mock()
         with patch.object(telemetry, '_sdk', sdk), patch.object(telemetry, '_seen', {}):
-            telemetry.report({'errorCode': 'API_UNAVAILABLE', 'slotId': 'demo-01', 'password': 'SECRET'})
-            telemetry.report({'errorCode': 'API_UNAVAILABLE', 'slotId': 'demo-01'})
+            telemetry.report({'errorCode': 'WORKER_FAILED', 'slotId': 'demo-01', 'password': 'SECRET'})
+            telemetry.report({'errorCode': 'WORKER_FAILED', 'slotId': 'demo-01'})
             self.assertEqual(sdk.capture_event.call_count, 1)
             self.assertNotIn('SECRET', str(sdk.capture_event.call_args))
+
+    def test_brief_transport_and_history_faults_are_local_but_persistent_faults_alert(self):
+        codes = ['API_UNAVAILABLE', 'HEALTH_API_UNAVAILABLE', 'HISTORY_UNAVAILABLE',
+                 'POSITIONS_UNAVAILABLE', 'TERMINAL_IPC_UNAVAILABLE', 'CHILD_TIMEOUT',
+                 'CHILD_FAILED', 'CATALOGUE_UNAVAILABLE']
+        sdk = Mock()
+        with patch.object(telemetry, '_sdk', sdk), patch.object(telemetry.time, 'monotonic') as clock:
+            for code in codes:
+                for now in [0, 90]:
+                    clock.return_value = now
+                    telemetry.report({'errorCode': code})
+            sdk.capture_event.assert_not_called()
+            telemetry.report({'state': 'health'})
+            self.assertEqual(telemetry._pending, {})
+            for code in codes:
+                for now in [200, 290, 380]:
+                    clock.return_value = now
+                    telemetry.report({'errorCode': code})
+            self.assertEqual(sdk.capture_event.call_count, len(codes))
 
     def test_transport_failure_does_not_fail_worker(self):
         sdk = Mock()
