@@ -72,6 +72,14 @@ class DurableDeliveryTests(unittest.TestCase):
         self.assertEqual(data['nativeErrorCode'], -6)
         self.assertEqual(data['release'], 'abcdef1')
 
+    def test_known_ui_and_update_errors_keep_their_specific_identity(self):
+        for code in ['UNSUPPORTED_TERMINAL_UI', 'UPDATE_STOP_FAILED']:
+            self.emit(code)
+        data = [json.loads(row[1]) for row in self.rows()]
+        self.assertEqual({row['errorCode'] for row in data},
+                         {'UNSUPPORTED_TERMINAL_UI', 'UPDATE_STOP_FAILED'})
+        self.assertNotIn('SECRET', str(data))
+
     def test_retry_lease_excludes_other_process(self):
         self.emit()
         other = DiagnosticOutbox(self.path, self.client, start=False)

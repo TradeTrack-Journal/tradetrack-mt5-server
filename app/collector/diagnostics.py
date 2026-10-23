@@ -26,6 +26,8 @@ API_REASONS = {
     'INVENTORY_LIMIT': 'The inventory exceeds the supported slot or server-state limit.',
 }
 EXPLANATIONS = {
+    'UNSUPPORTED_TERMINAL_UI': 'The terminal interface did not match the supported controls. Check the slot build and dialog state; collection requires verified UI evidence.',
+    'UPDATE_STOP_FAILED': 'The verified MT5 updater could not be stopped during fenced recovery. Relaunch remains deferred; inspect updater state and permissions without disabling UAC.',
     'UPDATE_MAINTENANCE_REQUIRED': 'A staged MT5 update would run during graceful shutdown. Builder maintenance is deferred; managed slot recovery uses a verified API fence and exact process termination.',
     'UPDATE_FILES_BUSY': 'MT5 update files are in use or inaccessible. Recovery preserves them and retries; it never relaunches over an active updater.',
     'API_TERMINAL_BUILD_UNSUPPORTED': 'This MT5 build passed local review but the API does not accept it yet. Deploy API compatibility before enabling this slot.',
