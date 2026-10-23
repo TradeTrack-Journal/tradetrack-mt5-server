@@ -24,4 +24,6 @@ Reports now share-lock the node for disable fencing and exclusively lock only th
 
 Sentry 1F (147951204) and 2F (155541397) resolved after verification; both last occurred about 20 hours earlier. Resolution leaves regression detection enabled. Screenshot: C:\TradeTrack\runtime\sentry-mt5-db-timeouts-resolved-20261023.png.
 
+Refreshing the final list exposed a separate recovered 1T progress event from 11:49 UTC, before this deployment. Worker records in that window include terminal quarantine/cooldown with ongoing collection (15–22 successful collections per minute around 11:48–11:51). It is not evidence of a new database timeout. Resolved that recovered signal after the 14:16:42 progress snapshot again confirmed zero blocked/late imports. No filtering or additional terminal change was made for it.
+
 Implementation details, references and experiment limits: tradetrack-api/docs/mt5-database-timeouts-20261023.md.
