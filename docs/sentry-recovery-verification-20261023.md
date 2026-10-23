@@ -38,3 +38,10 @@ Resolved and visibly verified: **13** worker CONNECTION_FAILED, **14** sync CONN
 
 Proof screenshot: C:\TradeTrack\runtime\sentry-mt5-after-20261023.png.
 API design and primary references: docs/mt5-recovery-20261023.md in tradetrack-api.
+
+## Additional incidents discovered after refreshing the issue list
+
+The list also exposed four incidents from 22 October, distinct from the four originally investigated. Worker logs confirm a genuine API/progress interruption around 18:08–18:12 UTC: only two successful collections at 18:08, none at 18:09/18:11, one at 18:10, then twenty at 18:12 and normal throughput afterward. Automatic recovery worked; this was not a new incident caused by today's deployment.
+
+- **2E MT5_PROGRESS_CHECK_FAILED** (18:09:19 UTC, one event) and **1T MT5_COLLECTION_STALLED** (last 18:12:19) resolved as recovered incidents after current progress checks passed. Monitoring remains enabled.
+- **2F**, one expired interactive transaction at 18:13:28 (5,000 ms budget, 5,536 ms elapsed), and **1F**, unable to start a transaction (last 18:13:30), remain open. Both affect jobs/claim. The expired transaction was detected in lockSlot before the admission advisory lock. The shared Prisma pool has max=5. Available evidence does not distinguish upstream DB/network latency, pool saturation, event-loop delay or row-lock contention. No blanket filtering, timeout increase or unverified pool resizing was applied. Root-cause investigation of these two separate issues remains outstanding.
