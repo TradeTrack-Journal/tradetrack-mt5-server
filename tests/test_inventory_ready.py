@@ -7,6 +7,34 @@ from app.collector.windows_inventory import InventoryError, WindowsTerminal
 
 
 class InventoryControlReadinessTests(unittest.TestCase):
+    def test_parallel_read_failure_discards_partial_list_and_waits_before_cancel(self):
+        import threading
+        windows = self.terminal()
+        windows.u.GetDlgItem.side_effect = [3, 4]
+        barrier = threading.Barrier(4, timeout=2)
+        active = set()
+        def send(h, msg, index=0, ptr=0):
+            if msg == 0x146:
+                return 100
+            if msg == 0x149:
+                if index < 4:
+                    active.add(index)
+                    try:
+                        barrier.wait()
+                    finally:
+                        active.remove(index)
+                return 200 if index == 1 else 1
+            return 1
+        def notify(h,msg,cmd,lparam):
+            if cmd == 2:
+                self.assertFalse(active)
+            return True
+        windows.send.side_effect = send
+        windows.u.SendNotifyMessageW.side_effect = notify
+        with self.assertRaisesRegex(InventoryError, 'SERVER_NAME_INVALID'):
+            windows.visible_servers(12,'terminal64.exe','12:34')
+        windows.u.SendNotifyMessageW.assert_called_with(2, 0x111, 2, 0)
+
     def test_full_posted_queue_does_not_prevent_inventory_or_cancel(self):
         windows = self.terminal()
         windows.u.PostMessageW.return_value = False  # Win32 ERROR_NOT_ENOUGH_QUOTA

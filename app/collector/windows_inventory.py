@@ -7,12 +7,13 @@ credential control reads. UI inspection is an explicit maintenance operation.
 import ctypes as c
 from ctypes import wintypes as w
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 import os
 import re
 from pathlib import Path
 import time
-from threading import Lock
+from threading import Event, Lock
 from .terminal_build import VERIFIED_BUILDS, file_build
 
 
@@ -193,7 +194,11 @@ class WindowsTerminal:
 
     def send(self, hwnd, message, index=0, pointer=0):
         result = c.c_size_t()
-        if not self.u.SendMessageTimeoutW(hwnd, message, index, pointer, 2, 3000, c.byref(result)):
+        # MT5 can service sent messages even when Windows' last-GetMessage
+        # heuristic marks it hung. Keep a hard timeout and fail on destruction.
+        c.set_last_error(0)
+        flags = 0x21 if message in (0x146, 0x149, 0x148) else 2
+        if not self.u.SendMessageTimeoutW(hwnd, message, index, pointer, flags, 3000, c.byref(result)):
             raise InventoryError("UI_TIMEOUT")
         return c.c_ssize_t(result.value).value
 
@@ -367,22 +372,38 @@ class WindowsTerminal:
                 count = self.send(combo, 0x146)
                 if not 0 <= count <= 1000:
                     raise InventoryError("SERVER_LIST_LIMIT")
-                names = []
-                # Hundreds of cross-process combo-box reads can exceed eight
-                # seconds under CPU contention even when every reply is valid.
-                # Keep a hard bound and all identity/count checks.
+                # Cross-process round trips dominate read time under message
+                # pressure. At most four synchronous reads may be outstanding,
+                # all against this same Server combo under the slot mutex.
                 read_deadline = time.monotonic() + 20
-                for index in range(count):
-                    if time.monotonic() > read_deadline:
-                        raise InventoryError("UI_TIMEOUT")
-                    length = self.send(combo, 0x149, index)
-                    if not 0 < length <= 128:
-                        raise InventoryError("SERVER_NAME_INVALID")
-                    # Keep the buffer alive until SendMessageTimeoutW completes.
-                    buffer = c.create_unicode_buffer(length + 1)
-                    if self.send(combo, 0x148, index, c.cast(buffer, c.c_void_p).value) != length:
-                        raise InventoryError("SERVER_LIST_CHANGED")
-                    names.append(buffer.value)
+                lanes = 4 if count >= 64 else 1
+                abort = Event()
+                def read_lane(offset):
+                    values = []
+                    try:
+                        for index in range(offset, count, lanes):
+                            if abort.is_set():
+                                break
+                            if time.monotonic() > read_deadline:
+                                raise InventoryError("UI_TIMEOUT")
+                            length = self.send(combo, 0x149, index)
+                            if not 0 < length <= 128:
+                                raise InventoryError("SERVER_NAME_INVALID")
+                            buffer = c.create_unicode_buffer(129)
+                            if self.send(combo, 0x148, index, c.cast(buffer, c.c_void_p).value) != length:
+                                raise InventoryError("SERVER_LIST_CHANGED")
+                            values.append(buffer.value)
+                        return values
+                    except Exception:
+                        abort.set()
+                        raise
+                if lanes == 1:
+                    names = read_lane(0)
+                else:
+                    with ThreadPoolExecutor(max_workers=lanes) as readers:
+                        names = [name for group in readers.map(read_lane, range(lanes)) for name in group]
+                if len(names) != count or time.monotonic() > read_deadline:
+                    raise InventoryError("UI_TIMEOUT")
                 if self.send(combo, 0x146) != count or self.process_identity(pid, executable) != identity:
                     raise InventoryError("TERMINAL_CHANGED")
                 return sorted(set(names))
