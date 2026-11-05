@@ -122,6 +122,8 @@ class WindowsTerminal:
         self.u.IsWindowEnabled.argtypes = [w.HWND]
         self.u.IsWindow.argtypes = [w.HWND]
         self.u.PostMessageW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM]
+        self.u.SendNotifyMessageW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM]
+        self.u.SendNotifyMessageW.restype = w.BOOL
         self.u.SendMessageTimeoutW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM, w.UINT, w.UINT, c.POINTER(c.c_size_t)]
         self.u.SendMessageTimeoutW.restype = w.LPARAM
 
@@ -273,7 +275,8 @@ class WindowsTerminal:
             raise InventoryError('TERMINAL_UI_BUSY')
         if self.process_identity(pid, executable) != identity:
             raise InventoryError('TERMINAL_CHANGED')
-        self.u.PostMessageW(dialog, 0x111, 2, later)
+        if not self.u.SendNotifyMessageW(dialog, 0x111, 2, later):
+            raise InventoryError('UI_CLEANUP_FAILED')
         deadline = time.monotonic() + 3
         while self.u.IsWindow(dialog) and self.u.IsWindowVisible(dialog) and time.monotonic() < deadline:
             time.sleep(0.05)
@@ -331,7 +334,7 @@ class WindowsTerminal:
                 commands = self.login_command(self.u.GetMenu(main))
                 if len(commands) != 1:
                     raise InventoryError("UNSUPPORTED_TERMINAL_UI")
-                if not self.u.PostMessageW(main, 0x111, commands[0], 0):
+                if not self.u.SendNotifyMessageW(main, 0x111, commands[0], 0):
                     raise InventoryError("UI_COMMAND_FAILED")
             try:
                 deadline = time.monotonic() + min(10, max(3, dialog_timeout))
@@ -385,7 +388,13 @@ class WindowsTerminal:
                 return sorted(set(names))
             finally:
                 if dialog and self.u.IsWindow(dialog):
-                    self.u.PostMessageW(dialog, 0x111, 2, 0)  # IDCANCEL; never IDOK.
+                    # Cross-thread sent notification uses scalar WM_COMMAND data.
+                    # A posted command can fail with ERROR_NOT_ENOUGH_QUOTA (1816)
+                    # or sit behind an MT5 backlog. Delivery is not an acknowledgment.
+                    if self.process_identity(pid, executable) != identity or not self.owned_by_main(pid, main, dialog):
+                        raise InventoryError('TERMINAL_CHANGED')
+                    if not self.u.SendNotifyMessageW(dialog, 0x111, 2, 0):  # IDCANCEL only
+                        raise InventoryError('UI_CLEANUP_FAILED')
                     # Two terminals can be processing their catalogs at once.
                     # Keep the slot locked until cancellation completes; a slow
                     # close must not be mistaken for a still-open login dialog.

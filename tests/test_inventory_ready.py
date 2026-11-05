@@ -7,6 +7,22 @@ from app.collector.windows_inventory import InventoryError, WindowsTerminal
 
 
 class InventoryControlReadinessTests(unittest.TestCase):
+    def test_full_posted_queue_does_not_prevent_inventory_or_cancel(self):
+        windows = self.terminal()
+        windows.u.PostMessageW.return_value = False  # Win32 ERROR_NOT_ENOUGH_QUOTA
+        windows.u.GetDlgItem.side_effect = [3, 4]
+        self.assertEqual(windows.visible_servers(12, 'terminal64.exe', '12:34'), [])
+        windows.u.PostMessageW.assert_not_called()
+        self.assertEqual([call.args for call in windows.u.SendNotifyMessageW.call_args_list],
+                         [(1, 0x111, 100, 0), (2, 0x111, 2, 0)])
+
+    def test_failed_cancel_cannot_publish_inventory(self):
+        windows = self.terminal()
+        windows.u.GetDlgItem.side_effect = [3, 4]
+        windows.u.SendNotifyMessageW.side_effect = [True, False]
+        with self.assertRaisesRegex(InventoryError, 'UI_CLEANUP_FAILED'):
+            windows.visible_servers(12, 'terminal64.exe', '12:34')
+
     def test_late_managed_login_is_consumed_without_second_menu_command(self):
         windows = self.terminal()
         windows.windows.side_effect = lambda pid: [1, 2]
@@ -17,7 +33,7 @@ class InventoryControlReadinessTests(unittest.TestCase):
         windows.u.IsWindowEnabled.return_value = False
         self.assertEqual(windows.visible_servers(12,'terminal64.exe','12:34',managed_login=True), [])
         windows.login_command.assert_not_called()
-        windows.u.PostMessageW.assert_called_once_with(2, 0x111, 2, 0)
+        windows.u.SendNotifyMessageW.assert_called_once_with(2, 0x111, 2, 0)
 
     def terminal(self):
         windows = object.__new__(WindowsTerminal)
@@ -30,7 +46,7 @@ class InventoryControlReadinessTests(unittest.TestCase):
         windows.login_command = MagicMock(return_value=[100])
         windows.u.GetWindow.return_value = 1
         windows.u.IsWindowEnabled.return_value = True
-        windows.u.PostMessageW.return_value = True
+        windows.u.SendNotifyMessageW.return_value = True
         windows.u.IsWindow.side_effect = [True, False, False]
         windows.u.GetWindowTextW.side_effect = lambda handle, buffer, size: setattr(buffer, 'value', 'Server:')
         windows.send = MagicMock(return_value=0)
@@ -43,7 +59,7 @@ class InventoryControlReadinessTests(unittest.TestCase):
             self.assertEqual(windows.visible_servers(12, 'terminal64.exe', '12:34'), [])
         sleep.assert_called_with(0.05)
         self.assertEqual(windows.u.GetDlgItem.call_count, 4)
-        windows.u.PostMessageW.assert_any_call(2, 0x111, 2, 0)
+        windows.u.SendNotifyMessageW.assert_any_call(2, 0x111, 2, 0)
 
     def test_dialog_delayed_by_cpu_contention_is_still_read_and_cancelled(self):
         windows = self.terminal()
@@ -55,7 +71,7 @@ class InventoryControlReadinessTests(unittest.TestCase):
             self.assertEqual(windows.visible_servers(12, 'terminal64.exe', '12:34'), [])
         self.assertGreaterEqual(clock[0], 4)
         self.assertLess(clock[0], 10)
-        windows.u.PostMessageW.assert_any_call(2, 0x111, 2, 0)
+        windows.u.SendNotifyMessageW.assert_any_call(2, 0x111, 2, 0)
 
     def test_unsupported_controls_still_fail_and_cancel(self):
         windows = self.terminal()
@@ -64,7 +80,7 @@ class InventoryControlReadinessTests(unittest.TestCase):
             with self.assertRaisesRegex(InventoryError, 'UNSUPPORTED_TERMINAL_UI'):
                 windows.visible_servers(12, 'terminal64.exe', '12:34')
         windows.send.assert_not_called()
-        windows.u.PostMessageW.assert_any_call(2, 0x111, 2, 0)
+        windows.u.SendNotifyMessageW.assert_any_call(2, 0x111, 2, 0)
 
     def test_large_catalogue_with_slow_valid_replies_is_not_false_timeout(self):
         import ctypes
@@ -95,7 +111,7 @@ class InventoryControlReadinessTests(unittest.TestCase):
                 patch('app.collector.windows_inventory.time.sleep', side_effect=lambda delay: clock.__setitem__(0, clock[0] + delay)):
             self.assertEqual(windows.visible_servers(12, 'terminal64.exe', '12:34'), [])
         self.assertGreaterEqual(clock[0], 1.5)
-        self.assertEqual(windows.u.PostMessageW.call_args_list[-1].args, (2, 0x111, 2, 0))
+        self.assertEqual(windows.u.SendNotifyMessageW.call_args_list[-1].args, (2, 0x111, 2, 0))
 
     def test_stuck_cancel_still_fails_closed(self):
         windows = self.terminal()
