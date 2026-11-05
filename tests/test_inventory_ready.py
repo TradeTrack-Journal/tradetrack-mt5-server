@@ -7,6 +7,18 @@ from app.collector.windows_inventory import InventoryError, WindowsTerminal
 
 
 class InventoryControlReadinessTests(unittest.TestCase):
+    def test_late_managed_login_is_consumed_without_second_menu_command(self):
+        windows = self.terminal()
+        windows.windows.side_effect = lambda pid: [1, 2]
+        windows.class_name = lambda h: {1:'MetaQuotes::MetaTrader::5.00', 2:'#32770',
+                                        3:'Static', 4:'ComboBox', 5:'Edit', 6:'Button'}[h]
+        windows.u.GetDlgItem.side_effect = lambda h, i: {10405:3,10139:4,10138:5,2:6}[i]
+        windows.u.GetWindowTextW.side_effect = lambda h,b,s: setattr(b,'value',{2:'Login',3:'Server:',6:'Cancel'}[h])
+        windows.u.IsWindowEnabled.return_value = False
+        self.assertEqual(windows.visible_servers(12,'terminal64.exe','12:34',managed_login=True), [])
+        windows.login_command.assert_not_called()
+        windows.u.PostMessageW.assert_called_once_with(2, 0x111, 2, 0)
+
     def terminal(self):
         windows = object.__new__(WindowsTerminal)
         windows.u = MagicMock()

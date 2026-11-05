@@ -94,6 +94,11 @@ class SlotWorker:
         self.inventory.connect()
         self.restart_identity = self.inventory.remote_slots[self.slot['id']].get('quarantineIdentity')
 
+    def needs_inventory(self):
+        now = time.monotonic()
+        return (bool(self.restart_identity) or not self.inspected_at or
+                now - self.inspected_at >= 90 or now - self.config_refreshed_at >= 60)
+
     def prepare_inventory(self):
         slot = self.slot
         if not self.restart_identity and time.monotonic() - getattr(self, 'config_refreshed_at', 0) >= 60:

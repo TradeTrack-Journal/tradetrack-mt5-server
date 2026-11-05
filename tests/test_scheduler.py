@@ -20,8 +20,10 @@ class Worker:
 
     def prepare_inventory(self):
         assert not self.busy
-        assert get_ident() == self.ui_thread
         self.inspected_at = 1
+
+    def needs_inventory(self):
+        return not self.inspected_at
 
     def once(self, allow_ui):
         assert not allow_ui
@@ -35,6 +37,24 @@ class Worker:
 
 
 class SchedulerTests(unittest.TestCase):
+    def test_blocked_ui_does_not_stop_a_verified_slot_collecting_again(self):
+        entered, release, done = Event(), Event(), Event()
+        fast = Worker('ready', lambda: None)
+        broken = Worker('slow-ui', lambda: None)
+        def inspect():
+            entered.set()
+            if not release.wait(2):
+                done.set()
+                raise RuntimeError('healthy slot starved by UI inspection')
+        broken.prepare_inventory = inspect
+        def collect():
+            if entered.is_set():
+                release.set()
+                done.set()
+        fast.action = collect
+        run_slots([fast, broken], lambda row: None, stop=done.is_set, poll_seconds=.001)
+        self.assertTrue(release.is_set())
+
     def test_api_conflict_details_survive_scheduler_without_raw_text(self):
         output = []
         def conflict():

@@ -1,4 +1,4 @@
-"""Independent slot dispatch; Windows UI maintenance stays on the calling thread."""
+"""Dispatch collection independently of the single serialized UI maintenance lane."""
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import re
@@ -23,6 +23,7 @@ class SlotState:
     started: float = 0
     failures: int = 0
     finished: bool = False
+    inspecting: bool = False
 
 
 def run_slots(workers, emit, preparation=None, once=False, stop=lambda: False,
@@ -34,6 +35,8 @@ def run_slots(workers, emit, preparation=None, once=False, stop=lambda: False,
     """
     states = [SlotState(worker) for worker in workers]
     preparation_at = 0
+    preparation_future = None
+    reserved = set()
     failed = False
 
     def defer(state, error):
@@ -48,13 +51,42 @@ def run_slots(workers, emit, preparation=None, once=False, stop=lambda: False,
         failed = True
         emit({'slotId': state.worker.slot['id'], 'state': 'retrying', 'errorCode': code, **error_fields(error)})
 
-    with ThreadPoolExecutor(max_workers=len(states)) as pool:
+    def inspect(state):
+        if stop():
+            return None
+        if not state.connected:
+            state.worker.connect()
+        return state.worker.prepare_inventory()
+
+    with ThreadPoolExecutor(max_workers=len(states)) as pool, ThreadPoolExecutor(max_workers=1) as ui:
         while True:
+            if preparation_future is not None and preparation_future.done():
+                try:
+                    result = preparation_future.result()
+                    if result:
+                        emit(result)
+                except Exception as error:
+                    emit({'state': 'SERVER_PREPARATION_RETRY', 'errorCode': error_code(error), **error_fields(error)})
+                preparation_future = None
+                reserved.clear()
             for state in states:
                 if state.future is None or not state.future.done():
                     continue
                 try:
                     result = state.future.result()
+                    if state.inspecting:
+                        state.inspecting = False
+                        state.connected = True
+                        state.future = None
+                        if result:
+                            emit(result)
+                            state.due = clock() + max(interval, min(120, result.get('retryAfterSeconds', 0)))
+                            state.finished = once
+                            failed = True
+                        elif not stop():
+                            state.started = clock()
+                            state.future = pool.submit(state.worker.once, allow_ui=False)
+                        continue
                     emit(dict(result, durationMs=round((clock() - state.started) * 1000)))
                     state.failures = 0
                     # The API owns per-account cadence. A successful slot can serve
@@ -66,12 +98,12 @@ def run_slots(workers, emit, preparation=None, once=False, stop=lambda: False,
                     state.finished = once
                 except Exception as error:
                     defer(state, error)
-                finally:
-                    state.future = None
+                state.future = None
+                state.inspecting = False
 
             draining = stop()
             if draining or (once and all(state.finished for state in states)):
-                if not any(state.future is not None for state in states):
+                if preparation_future is None and not any(state.future is not None for state in states):
                     return not failed
                 sleep(poll_seconds)
                 continue
@@ -81,28 +113,21 @@ def run_slots(workers, emit, preparation=None, once=False, stop=lambda: False,
             # slots so staggered claim timers cannot starve catalogue propagation.
             inspected = [s.worker for s in states if s.future is None and not s.finished
                          and s.connected and s.worker.inspected_at]
-            if preparation and inspected and clock() >= preparation_at:
+            if (preparation and inspected and preparation_future is None and
+                    not any(s.inspecting for s in states) and clock() >= preparation_at):
                 preparation_at = clock() + 30
-                try:
-                    result = preparation.once(inspected)
-                    if result:
-                        emit(result)
-                except Exception as error:
-                    emit({'state': 'SERVER_PREPARATION_RETRY', 'errorCode': error_code(error), **error_fields(error)})
+                reserved = {id(worker) for worker in inspected}
+                preparation_future = ui.submit(lambda slots=inspected: None if stop() else preparation.once(slots))
 
             for state in idle:
                 if stop():
                     break
+                if id(state.worker) in reserved:
+                    continue
                 try:
-                    if not state.connected:
-                        state.worker.connect()
-                        state.connected = True
-                    failure = state.worker.prepare_inventory()
-                    if failure:
-                        emit(failure)
-                        state.due = clock() + max(interval, min(120, failure.get('retryAfterSeconds', 0)))
-                        state.finished = once
-                        failed = True
+                    if not state.connected or state.worker.needs_inventory():
+                        state.inspecting = True
+                        state.future = ui.submit(inspect, state)
                         continue
                     state.started = clock()
                     state.future = pool.submit(state.worker.once, allow_ui=False)

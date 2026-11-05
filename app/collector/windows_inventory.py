@@ -280,7 +280,21 @@ class WindowsTerminal:
         if self.u.IsWindow(dialog) and self.u.IsWindowVisible(dialog):
             raise InventoryError('UI_CLEANUP_FAILED')
 
-    def prepare_login_window(self, pid, executable, identity, managed_login=False):
+    def known_managed_login(self, pid, main, dialog):
+        def caption(handle):
+            text = c.create_unicode_buffer(64)
+            self.u.GetWindowTextW(handle, text, len(text))
+            return text.value.replace('&', '').strip()
+        if caption(dialog) != 'Login' or not self.owned_by_main(pid, main, dialog):
+            return False
+        for control, kind, label in ((2, 'Button', 'Cancel'), (10405, 'Static', 'Server:'),
+                                     (10138, 'Edit', None), (10139, 'ComboBox', None)):
+            hwnd = self.u.GetDlgItem(dialog, control)
+            if not hwnd or self.class_name(hwnd) != kind or (label and caption(hwnd) != label):
+                return False
+        return True
+
+    def prepare_login_window(self, pid, executable, identity, managed_login=False, reuse_login=False):
         # Fresh/restarted managed terminals can show Update, Open Account and
         # Login together. Each cancellation still requires exact controls,
         # ownership and process identity; never dismiss an unknown dialog.
@@ -291,6 +305,9 @@ class WindowsTerminal:
             if len(mains) != 1:
                 raise InventoryError("TERMINAL_UI_BUSY")
             if not dialogs:
+                return before, mains[0]
+            if (managed_login and reuse_login and len(dialogs) == 1 and
+                    self.known_managed_login(pid, mains[0], dialogs[0])):
                 return before, mains[0]
             if attempt == 3 or (len(dialogs) > 1 and not managed_login):
                 raise InventoryError("TERMINAL_UI_BUSY")
@@ -303,18 +320,22 @@ class WindowsTerminal:
     def visible_servers(self, pid, executable, identity, managed_login=False, dialog_timeout=10):
         """Open only our own login dialog, read only its Server combo, cancel it."""
         with _inventory_ui_lock, self.inventory_lock(executable):
-            before, main = self.prepare_login_window(pid, executable, identity, managed_login)
-            if not self.u.IsWindowEnabled(main) or self.process_identity(pid, executable) != identity:
+            before, main = self.prepare_login_window(pid, executable, identity, managed_login, reuse_login=True)
+            # A late modal from the preceding timed-out request may already be
+            # ready. Only a positively identified managed Login can survive
+            # prepare_login_window. Read its server list and cancel exactly once.
+            dialog = next((h for h in before if self.class_name(h) == '#32770'), None)
+            if (not dialog and not self.u.IsWindowEnabled(main)) or self.process_identity(pid, executable) != identity:
                 raise InventoryError("TERMINAL_UI_BUSY")
-            commands = self.login_command(self.u.GetMenu(main))
-            if len(commands) != 1:
-                raise InventoryError("UNSUPPORTED_TERMINAL_UI")
-            dialog = None
-            if not self.u.PostMessageW(main, 0x111, commands[0], 0):
-                raise InventoryError("UI_COMMAND_FAILED")
+            if not dialog:
+                commands = self.login_command(self.u.GetMenu(main))
+                if len(commands) != 1:
+                    raise InventoryError("UNSUPPORTED_TERMINAL_UI")
+                if not self.u.PostMessageW(main, 0x111, commands[0], 0):
+                    raise InventoryError("UI_COMMAND_FAILED")
             try:
                 deadline = time.monotonic() + min(10, max(3, dialog_timeout))
-                while time.monotonic() < deadline:
+                while dialog is None and time.monotonic() < deadline:
                     dialogs = [h for h in self.windows(pid) if h not in before and self.class_name(h) == "#32770" and self.u.IsWindowVisible(h) and self.owned_by_main(pid, main, h)]
                     if len(dialogs) == 1:
                         dialog = dialogs[0]
