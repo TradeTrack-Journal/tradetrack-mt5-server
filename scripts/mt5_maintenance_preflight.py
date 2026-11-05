@@ -5,6 +5,7 @@ Never opens account credentials, starts/stops terminals, approves builds, or
 invokes LiveUpdate. Package filename versions are hints, not trusted binaries.
 """
 import argparse
+from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone
 import json
 import os
@@ -14,6 +15,18 @@ import re
 from app.collector.node_agent import InventoryAgent, load_config
 from app.collector.terminal_build import VERIFIED_BUILDS, file_build
 from scripts.supervise_production import load_token
+
+
+def inventory_clock(date_header, local):
+    # The API stamps its own heartbeat. Use the same HTTPS response's clock
+    # only for this diagnostic; never change OS time, leases or trading times.
+    try:
+        server = parsedate_to_datetime(date_header)
+        if server.tzinfo is not None:
+            return server.astimezone(timezone.utc), round((server - local).total_seconds(), 1)
+    except (ValueError, OverflowError, TypeError):
+        pass
+    return local, None
 
 
 def heartbeat_fresh(value, now):
@@ -91,10 +104,13 @@ def main():
         config = load_config(directory / 'agent.json')
         agent = InventoryAgent(config, load_token(directory / 'node-token.dpapi'))
         agent.connect()  # GET /config; verifies the exact registered slot paths.
-        inventory = agent.client.call('/inventory')  # GET only, no lease or account calls.
+        response_clock = {}
+        inventory = agent.client.call('/inventory', response_clock=response_clock)
+        now, offset = inventory_clock(response_clock.get('date'), datetime.now(timezone.utc))
         builds = {s['id']: file_build(s['executablePath']) for s in config['slots']}
         result = summarize(config, agent.remote_slots, inventory, builds,
-                           agent.accepted_builds, datetime.now(timezone.utc))
+                           agent.accepted_builds, now)
+        result['apiMinusVpsSeconds'] = offset
         root = Path(os.environ['APPDATA']) / 'MetaQuotes' / 'Terminal'
         result['pendingPackages'] = pending_packages(config, root)
         print(json.dumps(result))

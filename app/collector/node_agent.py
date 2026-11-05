@@ -51,7 +51,7 @@ class NodeClient:
         self.token = token
         self.opener = request.build_opener(NoRedirect())
 
-    def call(self, suffix, payload=None):
+    def call(self, suffix, payload=None, *, response_clock=None):
         data = None if payload is None else json.dumps(payload, separators=(",", ":")).encode()
         operation = suffix.rsplit('/', 1)[-1]
         # Inventory contains up to 16 slots with 2000 server states each.
@@ -66,6 +66,8 @@ class NodeClient:
             try:
                 with self.opener.open(req, timeout=10) as response:
                     raw = response.read(response_limit + 1)
+                    if response_clock is not None and suffix == '/inventory' and payload is None:
+                        response_clock['date'] = response.headers.get('Date')
                 if len(raw) > response_limit:
                     raise AgentError("API_RESPONSE_LIMIT", operation)
                 result = json.loads(raw)

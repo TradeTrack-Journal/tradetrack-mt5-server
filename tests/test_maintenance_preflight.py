@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import unittest
 
-from scripts.mt5_maintenance_preflight import heartbeat_fresh, summarize
+from scripts.mt5_maintenance_preflight import heartbeat_fresh, inventory_clock, summarize
 
 
 class MaintenancePreflightTests(unittest.TestCase):
@@ -26,6 +26,14 @@ class MaintenancePreflightTests(unittest.TestCase):
     def test_missing_duplicate_or_unexpected_slot_is_not_healthy(self):
         for slots in ([], [self.slot, self.slot], [dict(self.slot, id='other')]):
             self.assertEqual(self.report(slots)['healthySlots'], 0)
+
+    def test_slow_host_clock_does_not_mark_fresh_api_heartbeat_as_future(self):
+        authoritative, offset = inventory_clock('Wed, 14 Oct 2026 11:00:09 GMT', self.now)
+        self.assertEqual(offset, 9)
+        self.assertTrue(heartbeat_fresh(authoritative.isoformat(), authoritative))
+        self.assertFalse(heartbeat_fresh(self.now.isoformat(), self.now + timedelta(seconds=121)))
+        for invalid in (None, 'bad'):
+            self.assertEqual(inventory_clock(invalid, self.now), (self.now, None))
 
     def test_stale_future_naive_or_invalid_heartbeat_is_not_healthy(self):
         for value in (None, 'bad', '2026-10-14T11:00:00',
