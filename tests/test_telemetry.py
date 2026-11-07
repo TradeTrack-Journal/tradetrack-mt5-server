@@ -6,6 +6,25 @@ from app.collector import telemetry
 
 
 class TelemetryTests(unittest.TestCase):
+    def test_native_code_is_safe_and_transient_recovery_does_not_alert(self):
+        from app.collector.diagnostics import error_fields
+        from app.collector.node_agent import AgentError
+        for value in ('SECRET', True, -10011, 12345678, None):
+            self.assertNotIn('nativeErrorCode', error_fields(AgentError('CHILD_FAILED', native_code=value)))
+        event = telemetry.sanitize({'tags': {'error_code': 'TERMINAL_IPC_UNAVAILABLE',
+                                   'native_error_code': -10005, 'operation': 'initialize'},
+                                    'nativeMessage': 'SECRET'}, {})
+        self.assertEqual(event['contexts']['mt5_diagnostics']['nativeErrorCode'], -10005)
+        self.assertNotIn('SECRET', str(event))
+        sdk = Mock()
+        with patch.object(telemetry, '_sdk', sdk), patch.object(telemetry.time, 'monotonic') as clock:
+            for now, code in [(0, 'TERMINAL_IPC_UNAVAILABLE'), (90, None), (181, 'TERMINAL_IPC_UNAVAILABLE')]:
+                clock.return_value = now
+                telemetry.report({'slotId': 'demo-01', 'errorCode': code,
+                                  'state': 'retrying' if code else 'collected',
+                                  'operation': 'initialize', 'nativeErrorCode': -10005})
+            sdk.capture_event.assert_not_called()
+
     def test_identity_and_result_conflicts_are_immediate_even_after_generic_409(self):
         sdk = Mock()
         with patch.object(telemetry, '_sdk', sdk):

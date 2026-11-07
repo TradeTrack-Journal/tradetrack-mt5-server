@@ -53,6 +53,7 @@ EXPLANATIONS = {
     'API_UNAVAILABLE': 'The worker could not reach TradeTrack API after bounded retries.',
     'API_RESPONSE_LIMIT': 'The API response exceeded the bounded client size limit.',
     'CHILD_TIMEOUT': 'The isolated MT5 collection process exceeded its deadline.',
+    'TERMINAL_IPC_UNAVAILABLE': 'The Python collector could not communicate with its MT5 terminal. The process is fenced and scheduled for bounded recovery; this does not prove invalid credentials or broker suspension.',
     'WORKER_FAILED': 'An unexpected worker operation failed; inspect the corresponding local worker log.',
 }
 
@@ -66,8 +67,14 @@ def api_fields(operation=None, reason=None):
     return fields
 
 
+def native_fields(code):
+    # Documented MT5 error numbers only; never pass native text or arbitrary data.
+    return {'nativeErrorCode': code} if type(code) is int and -10010 <= code <= -1 else {}
+
+
 def error_fields(error):
-    return api_fields(getattr(error, 'operation', None), getattr(error, 'reason', None))
+    return {**api_fields(getattr(error, 'operation', None), getattr(error, 'reason', None)),
+            **native_fields(getattr(error, 'native_code', None))}
 
 
 def explanation(code, reason=None):

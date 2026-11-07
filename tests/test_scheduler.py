@@ -37,6 +37,17 @@ class Worker:
 
 
 class SchedulerTests(unittest.TestCase):
+    def test_ipc_failure_keeps_numeric_cause_and_defers_slot(self):
+        output = []
+        def ipc_failure():
+            raise AgentError('TERMINAL_IPC_UNAVAILABLE', 'initialize', native_code=-10005)
+        worker = Worker('demo-10', ipc_failure)
+        self.assertFalse(run_slots([worker], output.append, once=True, poll_seconds=.001))
+        self.assertEqual(output, [{'slotId': 'demo-10', 'state': 'retrying',
+                                  'errorCode': 'TERMINAL_IPC_UNAVAILABLE',
+                                  'operation': 'initialize', 'nativeErrorCode': -10005}])
+        self.assertEqual(worker.inspected_at, 0)
+
     def test_blocked_ui_does_not_stop_a_verified_slot_collecting_again(self):
         entered, release, done = Event(), Event(), Event()
         fast = Worker('ready', lambda: None)

@@ -10,15 +10,16 @@ from urllib import error, parse, request
 from uuid import uuid4
 
 from app.collector.windows_inventory import InventoryError, collect_inventory
-from app.collector.diagnostics import API_REASONS, api_fields
+from app.collector.diagnostics import API_REASONS, api_fields, native_fields
 
 
 class AgentError(Exception):
-    def __init__(self, code, operation=None, reason=None):
+    def __init__(self, code, operation=None, reason=None, *, native_code=None):
         super().__init__(code)
         fields = api_fields(operation, reason)
         self.operation = fields.get('operation')
         self.reason = fields.get('apiReason')
+        self.native_code = native_fields(native_code).get('nativeErrorCode')
 
 
 def response_reason(response):

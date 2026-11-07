@@ -192,7 +192,10 @@ class SlotWorker:
                 self.client.call(path + "/fail", dict(lease, errorCode=result["errorCode"]))
                 if result["errorCode"] in ("CHILD_TIMEOUT", "CHILD_FAILED", "IDENTITY_DRIFT", "TERMINAL_CHANGED", "TERMINAL_IPC_UNAVAILABLE"):
                     self.restart_identity = identity
-                    raise AgentError("TERMINAL_QUARANTINED")
+                    # Quarantine is a recovery action, not the cause. Preserve the
+                    # original failure after the API acknowledges its durable fence.
+                    raise AgentError(result["errorCode"], operation=result.get('nativeOperation'),
+                                     native_code=result.get('nativeErrorCode'))
                 # Keep only bounded numeric diagnostics locally; never native text,
                 # credentials or account payloads. API failure contract stays unchanged.
                 details = {}

@@ -317,6 +317,40 @@ class GatewayTests(unittest.TestCase):
 
 
 class WorkerTests(unittest.TestCase):
+    def test_quarantined_failure_keeps_cause_and_native_code_after_fail_ack(self):
+        from datetime import datetime, timedelta, timezone
+        from app.collector.node_agent import AgentError
+        from app.collector.diagnostics import error_fields
+        for code in ('TERMINAL_IPC_UNAVAILABLE', 'CHILD_TIMEOUT', 'CHILD_FAILED', 'IDENTITY_DRIFT', 'TERMINAL_CHANGED'):
+            with self.subTest(code=code):
+                worker = object.__new__(SlotWorker)
+                worker.slot = {'id': 'demo-01', 'executablePath': 'terminal64.exe', 'dataPath': '.'}
+                worker.inspected_at = time.monotonic()
+                worker.restart_identity = None
+                worker.catalog_hash = 'catalog'
+                worker.inventory = MagicMock()
+                worker.inventory.sessions = {'demo-01': {'processIdentity': '12:34', 'generation': 'generation'}}
+                worker.windows = MagicMock()
+                worker.windows.inventory_lock.return_value = nullcontext()
+                worker.windows.find_process.return_value = (12, '12:34')
+                worker.client = MagicMock()
+                job = {'id': 'job', 'generation': 'generation', 'leaseToken': 'lease', 'fence': '1',
+                       'leaseUntil': (datetime.now(timezone.utc) + timedelta(minutes=3)).isoformat()}
+                worker.client.call.side_effect = [{'job': job}, {'investorPassword': 'SECRET'}, {}]
+                failure = {'errorCode': code, 'nativeOperation': 'initialize', 'nativeErrorCode': -10005,
+                           'nativeMessage': 'SECRET'}
+                with patch('app.collector.worker.catalogue_fingerprint', return_value='catalog'), \
+                        patch('app.collector.worker.run_child', return_value=failure), \
+                        self.assertRaises(AgentError) as caught:
+                    worker.once(allow_ui=False)
+                self.assertEqual(str(caught.exception), code)
+                self.assertEqual(worker.restart_identity, '12:34')
+                self.assertEqual(error_fields(caught.exception), {'operation': 'initialize', 'nativeErrorCode': -10005})
+                self.assertNotIn('SECRET', str(vars(caught.exception)))
+                self.assertTrue(worker.client.call.call_args.args[0].endswith('/fail'))
+                self.assertEqual(worker.client.call.call_args.args[1]['errorCode'], code)
+                self.assertFalse(any(c.args[0].endswith('/complete') for c in worker.client.call.call_args_list))
+
     def test_catalog_rewrite_requires_inventory_before_any_claim(self):
         worker = object.__new__(SlotWorker)
         worker.slot = {'id': 'catalog-test', 'executablePath': 'terminal64.exe', 'dataPath': '.'}

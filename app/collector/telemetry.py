@@ -6,7 +6,7 @@ from pathlib import Path
 from contextlib import closing
 import threading
 import time
-from .diagnostics import CRITICAL_API_REASONS, api_fields, explanation
+from .diagnostics import CRITICAL_API_REASONS, api_fields, explanation, native_fields
 
 _sdk = None
 _seen = {}
@@ -64,6 +64,7 @@ def sanitize(event, hint):
     if not re.fullmatch(r'[A-Z][A-Z0-9_]{0,63}', code):
         return None
     details = api_fields(tags.get('operation'), tags.get('api_reason'))
+    native = native_fields(tags.get('native_error_code'))
     reason = details.get('apiReason')
     message = 'MT5 worker: ' + code + (': ' + reason if reason else '') + '. ' + explanation(code, reason)
     return {
@@ -73,7 +74,7 @@ def sanitize(event, hint):
         'platform': 'python',
         'level': 'info' if code == 'MONITORING_CHECK' else 'error',
         'logentry': {'message': message, 'formatted': message},
-        'contexts': {'mt5_diagnostics': {'type': 'mt5_diagnostics', **details, 'explanation': explanation(code, reason)}},
+        'contexts': {'mt5_diagnostics': {'type': 'mt5_diagnostics', **details, **native, 'explanation': explanation(code, reason)}},
         'fingerprint': ['mt5-worker', code] + ([reason] if reason in CRITICAL_API_REASONS else []),
         'tags': {'component': 'mt5-worker', 'error_code': code,
                  'slot': safe_slot(tags.get('slot')),
