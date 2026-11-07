@@ -57,8 +57,13 @@ Disk C had only about 1.5 GiB free. Closed, date-named worker/terminal logs
 were selected for native NTFS compression without removal or renaming.
 The per-file SHA-256 manifest and completion result are kept outside Git at
 `C:\TradeTrack\runtime\mt5-closed-log-compression-20261107.json`.
-Active logs and account-history databases are excluded. Check the manifest
-status before claiming compression and hash verification completed.
+Active logs and account-history databases are excluded. Compression completed
+for 559 files; every SHA-256 matched. Logical size 1,989,513,710 bytes now
+occupies 609,144,832 bytes. Overall free space nevertheless fell to about
+1.0 GiB during the session, so compression does not resolve disk capacity.
+A metadata-only scan excluding dependency folders found 30 GiB in worker
+data, but no newly modified file above 50 MiB besides the existing watchdog
+log; the source of concurrent disk consumption is not established.
 
 Windows clock remains approximately eight seconds behind API time, a known
 separate finding. No unprivileged workaround changed clock or lease limits.
