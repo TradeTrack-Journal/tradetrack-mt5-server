@@ -55,6 +55,19 @@ Get-Content 'C:\Program Files\TradeTrack MT5 Maintenance\latest-candidate.json'
 
 Success requires `state: candidate_ready`, task result 0, and three signed executable hashes with matching versions in the candidate manifest. `approvedForProduction` remains false. `candidate_requires_review` and task result 2 preserve a nonzero vendor outcome for investigation, even when all signed binaries are present. A failed download, signature, install, timeout or disk check leaves production terminal files untouched. `status.json` records the failing phase, exception type, installer exit when available, and source line. A successful candidate is not evidence of collector compatibility.
 
+## Disk housekeeping verification (added November 11)
+
+Also inspect `TradeTrack MT5 Archive Maintenance`, its last result and
+`C:\TradeTrack\worker\update-archives\status.json`, plus current C: free space.
+This separate Limited-user task runs every 15 minutes and deduplicates only
+inactive, verified vendor update archives. See `disk-recovery-20261111.md`
+for preservation rules and deployment evidence. Do not recursively sum hard
+link lengths as allocated disk usage. Investigate a nonzero completed task
+result, status older than one hour during worker operation, or free space
+below 5 GiB. A running task or `budgetReached: true` alone is not a failure;
+the next bounded pass resumes remaining work. Notify only on a new actionable
+change; do not delete account bases or unique archived versions automatically.
+
 ## Production rollout gate
 
 The production worker remains a standard-user process. Do not launch production terminals as SYSTEM. Before promotion, validate authenticated IPC, account identity, read-only access, server catalogue handling and actual collection on one fenced canary. Permit the specific build in both API and collector only after validation, then roll out one idle slot at a time with backups, existing restart budgets and collection checks. Stop and roll back on failure.

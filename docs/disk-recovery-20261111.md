@@ -77,3 +77,20 @@ supervisors started 5560b07 at approximately 10:53:44–47 UTC. No terminal buil
 restart budget, UAC setting, account credential or access guard was changed.
 
 Reference: [Microsoft hard-link semantics](https://learn.microsoft.com/en-us/windows/win32/fileio/hard-links-and-junctions).
+
+## Runtime verification
+
+At 11:06 UTC all 1,061 paths in the initial inventory still existed with their
+original byte lengths (zero missing or size mismatches). Replacement content
+is checked with SHA-256 by the housekeeping process before releasing the
+duplicate allocation. At 11:09 UTC free space exceeded 12 GiB; the initial
+bounded bulk pass was still running and had not yet processed the whole
+backlog. Do not describe its progress counters as the final total.
+
+Every one of the ten slots had successful collections after the 10:54 rollout.
+The API check at 11:06:44 UTC reported collection/import OK, zero blocked
+imports and zero late collections/imports. Intermittent UI_DIALOG_UNAVAILABLE
+still occurred between successful collections; this storage fix is not proof
+that those UI errors or every cause of disconnection have been eliminated.
+Both new supervisor stderr files remained empty. No trading records, account
+databases or terminal builds were changed during this recovery.
