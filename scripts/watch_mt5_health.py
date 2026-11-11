@@ -30,8 +30,12 @@ def main():
     def emit(result):
         result['at'] = datetime.now(timezone.utc).isoformat()
         # Direct append bypasses Windows PowerShell native-output buffering.
-        with Path(args.log).open('a', encoding='utf-8') as stream:
-            stream.write(json.dumps(result) + '\n')
+        try:
+            with Path(args.log).open('a', encoding='utf-8') as stream:
+                stream.write(json.dumps(result) + '\n')
+        except OSError:
+            # Diagnostics must not disable recovery when the volume is full.
+            telemetry.report({'errorCode': 'WORKER_LOG_WRITE_FAILED'})
         telemetry.report(result)
 
     while True:

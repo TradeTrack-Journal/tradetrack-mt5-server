@@ -51,8 +51,12 @@ def main():
     role = 'health-watchdog' if args.watchdog else 'production'
 
     def emit(state, **fields):
-        with (directory / f'{role}-supervisor.jsonl').open('a', encoding='utf-8') as stream:
-            stream.write(json.dumps(dict(state=state, at=datetime.now(timezone.utc).isoformat(), **fields)) + '\n')
+        try:
+            with (directory / f'{role}-supervisor.jsonl').open('a', encoding='utf-8') as stream:
+                stream.write(json.dumps(dict(state=state, at=datetime.now(timezone.utc).isoformat(), **fields)) + '\n')
+        except OSError:
+            # Keep supervising the live child even when the diagnostic disk is full.
+            pass
 
     # A Python-owned mutex survives neither exit nor crash; an orphaned parent
     # shell cannot block the next launch. The task must use the same Windows user.

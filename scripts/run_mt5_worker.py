@@ -25,7 +25,11 @@ def emit(result):
                     stream.write(line + '\n')
         except OSError:
             telemetry.report({'errorCode': 'WORKER_LOG_WRITE_FAILED'})
-    print(line, flush=True)
+    try:
+        print(line, flush=True)
+    except OSError:
+        # stdout is also redirected to disk by the supervisor.
+        telemetry.report({'errorCode': 'WORKER_LOG_WRITE_FAILED'})
 
 
 def child():
