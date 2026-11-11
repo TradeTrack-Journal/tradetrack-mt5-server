@@ -94,3 +94,24 @@ still occurred between successful collections; this storage fix is not proof
 that those UI errors or every cause of disconnection have been eliminated.
 Both new supervisor stderr files remained empty. No trading records, account
 databases or terminal builds were changed during this recovery.
+
+Initial pass completed at 11:13:46 UTC, exit 0: 456 examined, 366 duplicate
+paths linked, 90 unique objects retained, 15,788,941,839 duplicate logical
+bytes released, zero busy skips. Actual free space was 14,960,791,552 bytes.
+
+The actual Windows task was manually started at 11:14:08 UTC and completed
+at 11:18:29 UTC. Scheduler final result **0**, state Ready. It resumed past
+456 existing linked paths, linked another 23 duplicates, retained four new
+unique objects, and skipped zero busy files. Free space reached
+15,771,418,624 bytes (14.69 GiB). No pending-original files remained. The
+11:15 trigger correctly did not create an overlapping process; its transient
+already-running result was replaced by final success. Next trigger 11:30:33
+UTC. The older backlog is not fully processed; bounded periodic runs continue
+it automatically without removing unique content.
+
+Health remained variable during observation: the API briefly reported two
+blocked imports and later one late collection/import, while worker logs
+contained UI_DIALOG_UNAVAILABLE and INVESTOR_UNVERIFIED. Those observations
+must not be described as fixed by storage recovery or bypassed by disabling
+access checks. The disk exhaustion and duplicate accumulation fixes are
+verified separately from complete MT5 service health.
