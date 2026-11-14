@@ -147,7 +147,7 @@ class TelemetryTests(unittest.TestCase):
     def test_brief_transport_and_history_faults_are_local_but_persistent_faults_alert(self):
         codes = ['API_UNAVAILABLE', 'HEALTH_API_UNAVAILABLE', 'HISTORY_UNAVAILABLE',
                  'POSITIONS_UNAVAILABLE', 'TERMINAL_IPC_UNAVAILABLE', 'CHILD_TIMEOUT',
-                 'CHILD_FAILED', 'CATALOGUE_UNAVAILABLE']
+                 'CHILD_FAILED', 'CATALOGUE_UNAVAILABLE', 'CONNECTION_FAILED']
         sdk = Mock()
         with patch.object(telemetry, '_sdk', sdk), patch.object(telemetry.time, 'monotonic') as clock:
             for code in codes:
