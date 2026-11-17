@@ -354,7 +354,7 @@ class WindowsTerminal:
                 # The dialog HWND can be enumerated before MT5 has created and
                 # populated its child controls, especially with two terminals.
                 # Wait boundedly for the same exact supported controls/label.
-                controls_deadline = time.monotonic() + 1
+                controls_deadline = time.monotonic() + 5
                 while True:
                     label = self.u.GetDlgItem(dialog, 10405)
                     combo = self.u.GetDlgItem(dialog, 10139)
@@ -365,7 +365,10 @@ class WindowsTerminal:
                         if text.value.replace("&", "").strip() == "Server:":
                             break
                     if time.monotonic() >= controls_deadline:
-                        raise InventoryError("UNSUPPORTED_TERMINAL_UI")
+                        # Missing controls are a readiness timeout, not evidence
+                        # that this supported build has an incompatible UI.
+                        # A populated but different layout still fails closed.
+                        raise InventoryError("UNSUPPORTED_TERMINAL_UI" if label and combo else "UI_TIMEOUT")
                     time.sleep(0.05)
                 if self.process_identity(pid, executable) != identity:
                     raise InventoryError("TERMINAL_CHANGED")

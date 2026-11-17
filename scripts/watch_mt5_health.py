@@ -12,7 +12,7 @@ from app.collector.quarantine_recovery import recover_quarantined
 from app.collector.scheduler import error_code
 from app.collector.diagnostics import error_fields
 from app.collector.windows_inventory import InventoryError, WindowsTerminal
-from app.collector.ui_recovery import UiRecoveryBudget, fence_ui_failure
+from app.collector.ui_recovery import UiRecoveryBudget, fence_ui_failure, response_time
 
 
 def main():
@@ -50,8 +50,11 @@ def main():
             config = load_config(args.config)
             agent = InventoryAgent(config, token)
             agent.connect()
+            response_clock = {}
+            clock_received = time.monotonic()
             try:
-                inventory = agent.client.call('/inventory')
+                inventory = agent.client.call('/inventory', response_clock=response_clock)
+                clock_received = time.monotonic()
                 emit({'state': 'health', 'slots': [
                     {k: s.get(k) for k in ('id', 'status', 'lastHeartbeat', 'errorCode')}
                     for s in inventory.get('slots', [])]})
@@ -61,7 +64,12 @@ def main():
                 emit({'state': 'inventory_unavailable', 'errorCode': error_code(exc), **error_fields(exc)})
             for slot in config['slots']:
                 observed = agent.remote_slots[slot['id']]
-                if ui_budget.observe(dict(observed, id=slot['id']), time.time()):
+                observation_time = time.monotonic()
+                api_now = response_time(response_clock.get('date'), clock_received, observation_time)
+                # Missing/untrusted response date fails closed for UI restart;
+                # already-quarantined recovery below remains independent.
+                if ui_budget.observe(dict(observed, id=slot['id']), observation_time,
+                                     heartbeat_now=api_now if api_now is not None else float('nan')):
                     try:
                         if ui_budget.reserve(slot['id'], time.time()) and fence_ui_failure(agent, slot, observed):
                             emit({'slotId': slot['id'], 'state': 'ui_recovery_fenced',

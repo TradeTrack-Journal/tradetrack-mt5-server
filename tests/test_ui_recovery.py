@@ -5,10 +5,34 @@ from datetime import datetime, timezone
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-from app.collector.ui_recovery import UiRecoveryBudget, fence_ui_failure
+from app.collector.ui_recovery import UiRecoveryBudget, fence_ui_failure, response_time
 
 
 class UiRecoveryTests(TestCase):
+    def test_api_clock_skew_does_not_reset_sustained_recovery(self):
+        budget = UiRecoveryBudget('unused')
+        for elapsed, expected in [(0, False), (60, False), (120, True)]:
+            # VPS UTC is 9 seconds behind; elapsed time is independent of UTC.
+            slot = self.snapshot(20009 + elapsed)
+            self.assertEqual(budget.observe(slot, 1000 + elapsed,
+                                           heartbeat_now=20009 + elapsed), expected)
+        self.assertFalse(budget.observe(self.snapshot(20009), 1180, heartbeat_now=20190))
+
+    def test_invalid_future_and_missing_clock_still_fail_closed(self):
+        budget = UiRecoveryBudget('unused')
+        for elapsed in (0, 60, 120):
+            self.assertFalse(budget.observe(self.snapshot(10000 + elapsed), elapsed,
+                                           heartbeat_now=9990 + elapsed))
+            self.assertFalse(budget.observe(self.snapshot(10000 + elapsed), elapsed,
+                                           heartbeat_now=float('nan')))
+
+    def test_authenticated_response_clock_expires_and_uses_monotonic_elapsed(self):
+        date = 'Tue, 17 Nov 2026 11:25:20 GMT'
+        stamp = datetime(2026, 11, 17, 11, 25, 20, tzinfo=timezone.utc).timestamp()
+        self.assertEqual(response_time(date, 1000, 1045), stamp + 45)
+        for header, now in [(None, 1045), ('invalid', 1045), (date, 999), (date, 1121)]:
+            self.assertIsNone(response_time(header, 1000, now))
+
     def snapshot(self, now, **extra):
         return dict({'id': 'one', 'status': 'ERROR', 'inventoryErrorCode': 'TERMINAL_UI_BUSY',
                      'processIdentity': '42:1', 'generation': 'g1',

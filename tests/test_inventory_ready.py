@@ -101,10 +101,30 @@ class InventoryControlReadinessTests(unittest.TestCase):
         self.assertLess(clock[0], 10)
         windows.u.SendNotifyMessageW.assert_any_call(2, 0x111, 2, 0)
 
-    def test_unsupported_controls_still_fail_and_cancel(self):
+    def test_missing_controls_timeout_and_cancel(self):
         windows = self.terminal()
         windows.u.GetDlgItem.return_value = 0
         with patch('app.collector.windows_inventory.time.monotonic', side_effect=range(10)):
+            with self.assertRaisesRegex(InventoryError, 'UI_TIMEOUT'):
+                windows.visible_servers(12, 'terminal64.exe', '12:34')
+        windows.send.assert_not_called()
+        windows.u.SendNotifyMessageW.assert_any_call(2, 0x111, 2, 0)
+
+    def test_controls_ready_after_two_seconds_are_not_unsupported(self):
+        windows = self.terminal()
+        clock = [0.0]
+        windows.u.GetDlgItem.side_effect = lambda h, control: (3 if control == 10405 else 4) if clock[0] >= 2 else 0
+        with patch('app.collector.windows_inventory.time.monotonic', side_effect=lambda: clock[0]), \
+                patch('app.collector.windows_inventory.time.sleep', side_effect=lambda delay: clock.__setitem__(0, clock[0] + delay)):
+            self.assertEqual(windows.visible_servers(12, 'terminal64.exe', '12:34'), [])
+        self.assertGreaterEqual(clock[0], 2)
+        self.assertLess(clock[0], 5)
+        windows.u.SendNotifyMessageW.assert_any_call(2, 0x111, 2, 0)
+
+    def test_populated_incompatible_controls_still_fail_closed(self):
+        windows = self.terminal()
+        windows.u.GetDlgItem.side_effect = lambda h, control: 4 if control == 10405 else 3
+        with patch('app.collector.windows_inventory.time.monotonic', side_effect=range(20)):
             with self.assertRaisesRegex(InventoryError, 'UNSUPPORTED_TERMINAL_UI'):
                 windows.visible_servers(12, 'terminal64.exe', '12:34')
         windows.send.assert_not_called()

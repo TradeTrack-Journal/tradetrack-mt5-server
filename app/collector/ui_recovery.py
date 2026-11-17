@@ -1,5 +1,6 @@
 """Bounded recovery of persistently unhealthy UI, using the existing server fence."""
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 import json
 import os
 from pathlib import Path
@@ -11,18 +12,33 @@ UI_ERRORS = frozenset({'TERMINAL_UI_BUSY', 'UI_DIALOG_UNAVAILABLE',
                        'UI_CLEANUP_FAILED', 'UI_TIMEOUT'})
 
 
+def response_time(date_header, received_monotonic, now_monotonic):
+    """Use the authenticated API clock for its heartbeats, never for leases."""
+    try:
+        stamp = parsedate_to_datetime(date_header)
+        elapsed = now_monotonic - received_monotonic
+        if stamp.tzinfo is not None and 0 <= elapsed <= 120:
+            return stamp.timestamp() + elapsed
+    except (ValueError, TypeError, OverflowError):
+        pass
+    return None
+
+
 class UiRecoveryBudget:
     def __init__(self, path):
         self.path = Path(path)
         self.observations = {}
 
-    def observe(self, slot, now):
+    def observe(self, slot, now, *, heartbeat_now=None):
+        # now is monotonic in the watchdog; heartbeat_now is the API's UTC.
+        # Never compare API timestamps against a drifting VPS wall clock.
+        heartbeat_now = now if heartbeat_now is None else heartbeat_now
         key = slot['id']
         try:
             heartbeat = datetime.fromisoformat(slot['lastHeartbeat'].replace('Z', '+00:00')).timestamp()
             valid = (slot.get('status') == 'ERROR' and slot.get('inventoryErrorCode') in UI_ERRORS
                      and bool(slot.get('processIdentity')) and bool(slot.get('generation'))
-                     and not slot.get('quarantineIdentity') and 0 <= now - heartbeat <= 120)
+                     and not slot.get('quarantineIdentity') and -1 <= heartbeat_now - heartbeat <= 120)
         except (KeyError, TypeError, ValueError, AttributeError):
             valid = False
         if not valid:

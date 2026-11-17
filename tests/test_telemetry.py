@@ -6,6 +6,19 @@ from app.collector import telemetry
 
 
 class TelemetryTests(unittest.TestCase):
+    def test_update_lock_alerts_only_if_retries_do_not_recover(self):
+        sdk = Mock()
+        with patch.object(telemetry, '_sdk', sdk), patch.object(telemetry.time, 'monotonic') as clock:
+            clock.return_value = 0
+            telemetry.report({'slotId': 'demo-02', 'errorCode': 'UPDATE_FILES_BUSY'})
+            clock.return_value = 60
+            telemetry.report({'slotId': 'demo-02', 'state': 'restarted'})
+            sdk.capture_event.assert_not_called()
+            for now in [120, 180, 300]:
+                clock.return_value = now
+                telemetry.report({'slotId': 'demo-02', 'errorCode': 'UPDATE_FILES_BUSY'})
+            sdk.capture_event.assert_called_once()
+
     def test_native_code_is_safe_and_transient_recovery_does_not_alert(self):
         from app.collector.diagnostics import error_fields
         from app.collector.node_agent import AgentError
