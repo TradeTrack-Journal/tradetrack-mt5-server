@@ -32,6 +32,8 @@ def choose_pair(workers):
             # A strict superset adds names and cannot remove a target's servers.
             # Equal sets need no restart even if MT5 rewrote access-point metadata.
             if set(target_snapshot['serverNames']) < names:
+                if source.windows.terminal_build(source.slot['executablePath']) != target.windows.terminal_build(target.slot['executablePath']):
+                    continue  # Another build needs its own verified catalogue.
                 return source, target, source_snapshot, target_snapshot
     return None
 
@@ -66,6 +68,11 @@ def install_catalogue(worker, data, source_names, source_build):
         if not pid or identity != snapshot['processIdentity'] or catalogue_fingerprint(root) != snapshot['catalogHash']:
             raise InventoryError('TERMINAL_CHANGED')
         session = worker.inventory.sessions[slot['id']]
+        # Reserve capacity BEFORE removing the slot from the pool. The stop
+        # helper rechecks this same identity idempotently. A cooldown must not
+        # quarantine healthy slots while propagation visits the rest of the pool.
+        from .restart_budget import reserve_restart
+        reserve_restart(executable, identity)
         # API atomically refuses RUNNING jobs and quarantines the old process.
         worker.client.call(f"/slots/{slot['id']}/prepare", {'generation': session['generation']})
         stop_fenced_terminal(native, executable, identity, worker.client, slot['id'])

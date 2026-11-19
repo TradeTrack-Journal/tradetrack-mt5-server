@@ -60,10 +60,24 @@ class CatalogueSyncTests(unittest.TestCase):
 
     def test_build_mismatch_does_not_stop_target(self):
         self.target.windows.terminal_build.return_value = 6230
-        with self.assertRaisesRegex(InventoryError, 'CATALOGUE_BUILD_MISMATCH'):
-            synchronize_once([self.source, self.target])
+        self.assertIsNone(synchronize_once([self.source, self.target]))
         self.target.client.call.assert_not_called()
         self.assertEqual(Path(self.target.slot['dataPath'], 'config/servers.dat').read_bytes(), b'old')
+
+    def test_cooldown_never_removes_healthy_target_from_pool(self):
+        with patch('app.collector.restart_budget.reserve_restart', side_effect=InventoryError('RECOVERY_COOLDOWN')), \
+                patch('app.collector.catalogue_sync.stop_fenced_terminal') as close:
+            with self.assertRaisesRegex(InventoryError, 'RECOVERY_COOLDOWN'):
+                synchronize_once([self.source, self.target])
+        self.target.client.call.assert_not_called()
+        close.assert_not_called()
+        self.assertEqual(Path(self.target.slot['dataPath'], 'config/servers.dat').read_bytes(), b'old')
+
+    def test_mixed_build_pool_still_selects_compatible_target(self):
+        other = worker(self.root, 'demo-10', ['Existing'], b'old')
+        other.windows.terminal_build.return_value = 6246
+        pair = choose_pair([self.source, self.target, other])
+        self.assertIs(pair[1], self.target)
 
     def test_busy_api_fence_prevents_shutdown_and_writes(self):
         self.target.client.call.side_effect = AgentError('API_HTTP_409')
