@@ -11,6 +11,7 @@ from .history import plan_recent_history, plan_history_before
 from .normalization import normalize_account, normalize_deals, normalize_positions
 from .clock_observation import sample as clock_sample, record as record_clock
 from .windows_inventory import InventoryError, WindowsTerminal, validate_data_path
+from .terminal_build import VERIFIED_BUILDS
 
 
 class CollectionError(Exception):
@@ -47,9 +48,9 @@ def journal_baseline(data_path):
     return {p.name: (p.stat().st_ino, p.stat().st_size) for p in paths}
 
 
-def fresh_journal_lines(data_path, baseline):
+def fresh_journal_records(data_path, baseline):
     """Bounded appended journal evidence; never returned across the native boundary."""
-    for path in (Path(data_path) / "logs").glob("*.log"):
+    for path in sorted((Path(data_path) / "logs").glob("*.log")):
         stat = path.stat()
         inode, offset = baseline.get(path.name, (stat.st_ino, 0))
         if inode != stat.st_ino or stat.st_size < offset or stat.st_size - offset > 1024 * 1024:
@@ -66,7 +67,47 @@ def fresh_journal_lines(data_path, baseline):
         if len(fresh) % 2:
             continue
         for line in fresh.decode("utf-16-le").split('\n')[:-1]:
-            yield line.rstrip('\r')
+            yield path.stem, line.rstrip('\r')
+
+
+def fresh_journal_lines(data_path, baseline):
+    for _, line in fresh_journal_records(data_path, baseline):
+        yield line
+
+
+def investor_session_evidence(data_path, baseline, login, server, started_at):
+    """Positive, current-login evidence; never infer investor access from trade_allowed.
+
+    Buffered old records, different accounts/servers and superseded sessions cannot
+    authorize reads. Native identity/access/process guards still run for every read.
+    Timestamps are compared only within the VPS's local clock, never broker time.
+    """
+    if not isinstance(baseline, dict):
+        return False
+    authorized = verified = False
+    prefix = f"'{login}': "
+    try:
+        for day, line in fresh_journal_records(data_path, baseline):
+            fields = line.split('\t')
+            if len(fields) != 5 or fields[3] != 'Network':
+                continue
+            try:
+                stamp = datetime.strptime(day + ' ' + fields[2], '%Y%m%d %H:%M:%S.%f')
+            except ValueError:
+                continue
+            if stamp < started_at:
+                continue
+            message = fields[4].strip()
+            if re.match(r"'\d+': authorized on ", message):
+                authorized = message.startswith(prefix + f'authorized on {server} through ')
+                verified = False
+            elif re.match(r"'\d+': (?:disconnected from |authorization on |trading has been enabled)", message):
+                authorized = verified = False
+            elif authorized and message == prefix + 'trading has been disabled - investor mode':
+                verified = True
+    except (OSError, UnicodeError, CollectionError):
+        return False
+    return authorized and verified
 
 
 def investor_evidence(data_path, baseline, login):
@@ -185,10 +226,11 @@ def collect(request, native=None, windows=None):
     validate_data_path(executable, data_path)
     verified_build = None
     trading_mode = None
+    access_method = None
     consented = credentials.get("allowTradingPassword") is True
 
     def identity():
-        nonlocal verified_build, trading_mode
+        nonlocal verified_build, trading_mode, access_method
         if windows.process_identity(request["processId"], executable) != request["processIdentity"]:
             raise CollectionError("TERMINAL_CHANGED")
         account, terminal = native.account_info(), native.terminal_info()
@@ -204,8 +246,16 @@ def collect(request, native=None, windows=None):
         trading_mode = bool(account.trade_allowed)
         if not terminal.tradeapi_disabled:
             raise CollectionError("PYTHON_TRADING_ENABLED")
-        if not trading_mode and not consented and not windows.read_only_session(request["processId"], executable, request["processIdentity"], login, server, terminal.build):
-            raise CollectionError("INVESTOR_UNVERIFIED")
+        if not trading_mode and not consented:
+            if windows.read_only_session(request["processId"], executable, request["processIdentity"], login, server, terminal.build):
+                access_method = 'terminal_title_read_only'
+            elif (type(terminal.build) is int and terminal.build in VERIFIED_BUILDS and
+                  investor_session_evidence(data_path, baseline, login, server, login_started_at)):
+                if windows.process_identity(request['processId'], executable) != request['processIdentity']:
+                    raise CollectionError('TERMINAL_CHANGED')
+                access_method = 'terminal_journal_read_only'
+            else:
+                raise CollectionError("INVESTOR_UNVERIFIED")
         if verified_build is not None and verified_build != terminal.build:
             raise CollectionError("IDENTITY_DRIFT")
         verified_build = terminal.build
@@ -219,6 +269,7 @@ def collect(request, native=None, windows=None):
             baseline = journal_baseline(data_path)
         except (OSError, CollectionError):
             baseline = None
+        login_started_at = datetime.now()
         if not native.initialize(executable, login=int(login), password=credentials["investorPassword"], server=server,
                                  portable=Path(data_path).resolve() == Path(executable).parent.resolve(), timeout=20000):
             details = {}
@@ -307,7 +358,7 @@ def collect(request, native=None, windows=None):
                     "observedAt": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
                     "timestampBasis": "broker_reported_unresolved", "historyCompletenessVerified": False,
                     "investorVerified": not consented and not trading_mode, "pythonTradingDisabled": True,
-                    "investorVerificationMethod": "trading_password_consent" if consented else "terminal_title_read_only", "terminalBuild": verified_build,
+                    "investorVerificationMethod": "trading_password_consent" if consented else access_method, "terminalBuild": verified_build,
                     "account": asdict(account),
                     "windowStartMs": window.start_ms, "windowEndMs": window.end_ms,
                     **({"rangeCountVerified": True, "olderHistoryEmpty": older_empty} if count_verified else {}),
